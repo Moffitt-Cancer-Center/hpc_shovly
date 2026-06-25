@@ -132,7 +132,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    initializeCharts();
+    try {
+        initializeCharts();
+    } catch (e) {
+        console.error('Chart.js failed to initialize:', e);
+        document.getElementById('cost-chart').parentElement.innerHTML = '<p style="color:#a0a0a0;text-align:center">Charts unavailable</p>';
+        document.getElementById('instance-chart').parentElement.innerHTML = '<p style="color:#a0a0a0;text-align:center">Charts unavailable</p>';
+    }
     updateDashboard(); // Initial load
     setInterval(updateDashboard, 5000); // Update every 5 seconds
 });
