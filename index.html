@@ -3,122 +3,297 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPC to Cloud Cost Dashboard</title>
+    <title>Enterprise HPC Cloud Cost Modeler</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans p-6 min-h-screen">
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen antialiased selection:bg-blue-600">
 
-    <div class="max-w-6xl mx-auto">
-        <header class="flex justify-between items-center mb-8 pb-4 border-b border-slate-200">
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 pb-6 border-b border-slate-800">
             <div>
-                <h1 class="text-3xl font-bold text-slate-900">Cluster Infrastructure vs. Cloud</h1>
-                <p class="text-sm text-slate-500 mt-1">Live equivalent hourly cost for active workloads</p>
+                <div class="flex items-center gap-3">
+                    <span class="h-3 w-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <h1 class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+                        HPC Cluster Cloud Cost Engine
+                    </h1>
+                </div>
+                <p class="text-sm text-slate-400 mt-1">Cross-referencing on-premises architecture against current AWS & Azure compute paradigms</p>
             </div>
-            <button onclick="exportToCSV()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded shadow transition">
-                Download CSV
-            </button>
+            <div class="flex items-center gap-3 w-full md:w-auto">
+                <div class="bg-slate-800 p-1 rounded-lg flex items-center border border-slate-700">
+                    <button id="btnLive" onclick="setMode('live')" class="px-4 py-1.5 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-md">
+                        Live Cluster
+                    </button>
+                    <button id="btnSim" onclick="setMode('sim')" class="px-4 py-1.5 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white">
+                        What-If Simulator
+                    </button>
+                </div>
+                <button onclick="exportToCSV()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 px-4 rounded-lg border border-slate-700 shadow-sm transition whitespace-nowrap text-sm">
+                    Export CSV
+                </button>
+            </div>
         </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-                <h3 class="text-slate-500 text-sm font-medium">Active Nodes</h3>
-                <p id="activeNodes" class="text-4xl font-bold mt-2">-</p>
-                <p class="text-xs text-slate-400 mt-2">Currently running jobs</p>
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+
+            <div class="lg:col-span-1 bg-slate-800/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl flex flex-col gap-6">
+                <div>
+                    <h2 class="text-lg font-bold text-white mb-1">Configuration Modeler</h2>
+                    <p class="text-xs text-slate-400" id="sidebarContext">Currently showing live infrastructure data.</p>
+                </div>
+
+                <hr class="border-slate-800">
+
+                <div class="flex flex-col gap-5 opacity-40 pointer-events-none transition-opacity duration-300" id="sliderGroup">
+                    <div>
+                        <label class="flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                            <span>Homogeneous Compute Nodes</span>
+                            <span id="valCluster1" class="text-blue-400 font-mono">0</span>
+                        </label>
+                        <input type="range" id="slideCluster1" min="0" max="200" value="0" oninput="onSliderChange()" class="w-full accent-blue-500 bg-slate-700 h-2 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <div>
+                        <label class="flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                            <span>DGX & RTX Accelerator Nodes</span>
+                            <span id="valCluster2" class="text-amber-400 font-mono">0</span>
+                        </label>
+                        <input type="range" id="slideCluster2" min="0" max="50" value="0" oninput="onSliderChange()" class="w-full accent-amber-500 bg-slate-700 h-2 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <div>
+                        <label class="flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                            <span>Big Memory & Misc Nodes</span>
+                            <span id="valCluster3" class="text-purple-400 font-mono">0</span>
+                        </label>
+                        <input type="range" id="slideCluster3" min="0" max="100" value="0" oninput="onSliderChange()" class="w-full accent-purple-500 bg-slate-700 h-2 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <hr class="border-slate-800 my-1">
+
+                    <div>
+                        <label class="flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                            <span>Cloud Market Modifier</span>
+                            <span id="valDiscount" class="text-emerald-400 font-mono">On-Demand (0%)</span>
+                        </label>
+                        <input type="range" id="slideDiscount" min="-70" max="30" value="0" step="5" oninput="onSliderChange()" class="w-full accent-emerald-500 bg-slate-700 h-2 rounded-lg appearance-none cursor-pointer">
+                        <p class="text-[10px] text-slate-500 mt-1">Simulate Spot pricing (-70%) or premium tier agreements (+30%).</p>
+                    </div>
+                </div>
             </div>
-            <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-                <h3 class="text-slate-500 text-sm font-medium">AWS Equivalent Cost</h3>
-                <p id="awsCost" class="text-4xl font-bold text-amber-600 mt-2">$-</p>
-                <p class="text-xs text-slate-400 mt-2">per hour</p>
-            </div>
-            <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-                <h3 class="text-slate-500 text-sm font-medium">Azure Equivalent Cost</h3>
-                <p id="azureCost" class="text-4xl font-bold text-blue-600 mt-2">$-</p>
-                <p class="text-xs text-slate-400 mt-2">per hour</p>
+
+            <div class="lg:col-span-3 flex flex-col gap-8">
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                    <div class="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md">
+                        <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider">Active Evaluated Nodes</h3>
+                        <p id="kpiNodes" class="text-4xl font-extrabold mt-2 text-white font-mono">-</p>
+                        <div class="flex items-center gap-1.5 mt-2">
+                            <span id="badgeMode" class="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-medium border border-emerald-500/20">Live Sync</span>
+                        </div>
+                    </div>
+                    <div class="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md border-l-4 border-l-amber-500">
+                        <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider">AWS Hourly Delta</h3>
+                        <p id="kpiAws" class="text-4xl font-extrabold mt-2 text-amber-400 font-mono">$-</p>
+                        <p class="text-[10px] text-slate-500 mt-2">Estimated standard architecture match</p>
+                    </div>
+                    <div class="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md border-l-4 border-l-blue-500">
+                        <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider">Azure Hourly Delta</h3>
+                        <p id="kpiAzure" class="text-4xl font-extrabold mt-2 text-blue-400 font-mono">$-</p>
+                        <p class="text-[10px] text-slate-500 mt-2">Estimated consumption rate match</p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800/30 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-md font-bold text-white">Cumulative Cost Projections Over Time</h3>
+                        <span class="text-xs text-slate-500 font-mono" id="lastUpdated">Syncing...</span>
+                    </div>
+                    <div class="h-80">
+                        <canvas id="costChart"></canvas>
+                    </div>
+                </div>
+
             </div>
         </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-8 h-96">
-            <canvas id="costChart"></canvas>
-        </div>
-
-        <p class="text-xs text-center text-slate-400" id="lastUpdated">Last Updated: Loading...</p>
     </div>
 
     <script>
+        let currentMode = 'live';
         let costChart = null;
-        let globalJobDetails = [];
+        let liveDataCached = null;
 
-        async function fetchData() {
-            try {
-                const response = await fetch('/api/metrics');
-                const data = await response.json();
-                
-                document.getElementById('activeNodes').innerText = data.active_jobs;
-                document.getElementById('awsCost').innerText = '$' + data.hourly_cost_aws;
-                document.getElementById('azureCost').innerText = '$' + data.hourly_cost_azure;
-                document.getElementById('lastUpdated').innerText = 'Last Updated: ' + data.last_updated;
-                
-                globalJobDetails = data.job_details;
-                updateChart(data.hourly_cost_aws, data.hourly_cost_azure);
-            } catch (error) {
-                console.error("Error fetching metrics:", error);
+        // Static cloud baseline definitions matching backend assumptions
+        const UNIT_RATES = {
+            cluster1: { aws: 1.21, azure: 1.15 }, // Proxy standard node footprint
+            cluster2: { aws: 42.50, azure: 40.10 }, // Heavy GPU mix baseline
+            cluster3: { aws: 0.85, azure: 0.81 }   // High-mem / Mixed CPU baseline
+        };
+
+        function setMode(mode) {
+            currentMode = mode;
+            const liveBtn = document.getElementById('btnLive');
+            const simBtn = document.getElementById('btnSim');
+            const sliderGroup = document.getElementById('sliderGroup');
+            const sidebarContext = document.getElementById('sidebarContext');
+            const badgeMode = document.getElementById('badgeMode');
+
+            if (mode === 'live') {
+                liveBtn.className = "px-4 py-1.5 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-md";
+                simBtn.className = "px-4 py-1.5 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white";
+                sliderGroup.classList.add('opacity-40', 'pointer-events-none');
+                sidebarContext.innerText = "Currently showing live infrastructure data.";
+                badgeMode.innerText = "Live Sync";
+                badgeMode.className = "text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-medium border border-emerald-500/20";
+                if(liveDataCached) renderDashboard(liveDataCached);
+            } else {
+                simBtn.className = "px-4 py-1.5 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-md";
+                liveBtn.className = "px-4 py-1.5 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white";
+                sliderGroup.classList.remove('opacity-40', 'pointer-events-none');
+                sidebarContext.innerText = "Adjust handles below to model arbitrary compute projections.";
+                badgeMode.innerText = "Simulation";
+                badgeMode.className = "text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded font-medium border border-amber-500/20";
+                calculateSimulation();
             }
         }
 
-        function updateChart(aws, azure) {
+        async function fetchLiveMetrics() {
+            try {
+                const response = await fetch('/api/metrics');
+                const data = await response.json();
+                liveDataCached = data;
+
+                if (currentMode === 'live') {
+                    renderDashboard(data);
+                }
+            } catch (error) {
+                console.error("Critical error hitting backend endpoints:", error);
+            }
+        }
+
+        function renderDashboard(data) {
+            document.getElementById('kpiNodes').innerText = data.active_jobs;
+            document.getElementById('kpiAws').innerText = '$' + data.hourly_cost_aws.toLocaleString();
+            document.getElementById('kpiAzure').innerText = '$' + data.hourly_cost_azure.toLocaleString();
+            document.getElementById('lastUpdated').innerText = 'Last Backend Sync: ' + data.last_updated;
+
+            updateChart(data.hourly_cost_aws, data.hourly_cost_azure);
+        }
+
+        function onSliderChange() {
+            if (currentMode !== 'sim') return;
+            calculateSimulation();
+        }
+
+        function calculateSimulation() {
+            const c1 = parseInt(document.getElementById('slideCluster1').value);
+            const c2 = parseInt(document.getElementById('slideCluster2').value);
+            const c3 = parseInt(document.getElementById('slideCluster3').value);
+            const modifierPercent = parseInt(document.getElementById('slideDiscount').value);
+
+            document.getElementById('valCluster1').innerText = c1;
+            document.getElementById('valCluster2').innerText = c2;
+            document.getElementById('valCluster3').innerText = c3;
+
+            let modText = modifierPercent === 0 ? "On-Demand (0%)" : (modifierPercent > 0 ? `+${modifierPercent}% Premium` : `${modifierPercent}% Discount`);
+            document.getElementById('valDiscount').innerText = modText;
+
+            // Compute multi-variable pricing
+            let rawAws = (c1 * UNIT_RATES.cluster1.aws) + (c2 * UNIT_RATES.cluster2.aws) + (c3 * UNIT_RATES.cluster3.aws);
+            let rawAzure = (c1 * UNIT_RATES.cluster1.azure) + (c2 * UNIT_RATES.cluster2.azure) + (c3 * UNIT_RATES.cluster3.azure);
+
+            let factor = 1 + (modifierPercent / 100);
+            let finalAws = Math.max(0, rawAws * factor);
+            let finalAzure = Math.max(0, rawAzure * factor);
+
+            document.getElementById('kpiNodes').innerText = c1 + c2 + c3;
+            document.getElementById('kpiAws').innerText = '$' + (Math.round(finalAws * 100) / 100).toLocaleString();
+            document.getElementById('kpiAzure').innerText = '$' + (Math.round(finalAzure * 100) / 100).toLocaleString();
+
+            updateChart(finalAws, finalAzure);
+        }
+
+        function updateChart(awsHourly, azureHourly) {
+            // Transform hourly points into structural timelines: Day, Week, Month (730 Hours)
+            const timelines = ['Hourly Delta', 'Daily Operational Run', 'Weekly Outlay', 'Monthly Commit (730h)'];
+            const awsData = [awsHourly, awsHourly * 24, awsHourly * 24 * 7, awsHourly * 730];
+            const azureData = [azureHourly, azureHourly * 24, azureHourly * 24 * 7, azureHourly * 730];
+
             const ctx = document.getElementById('costChart').getContext('2d');
+
             if (costChart) {
-                costChart.data.datasets[0].data = [aws, azure];
+                costChart.data.datasets[0].data = awsData;
+                costChart.data.datasets[1].data = azureData;
                 costChart.update();
                 return;
             }
+
             costChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: ['AWS (On-Demand)', 'Azure (Consumption)'],
-                    datasets: [{
-                        label: 'Hourly Cost ($)',
-                        data: [aws, azure],
-                        backgroundColor: ['rgba(245, 158, 11, 0.7)', 'rgba(37, 99, 235, 0.7)'],
-                        borderColor: ['rgb(217, 119, 6)', 'rgb(29, 78, 216)'],
-                        borderWidth: 1,
-                        borderRadius: 4
-                    }]
+                    labels: timelines,
+                    datasets: [
+                        {
+                            label: 'AWS Cloud Services',
+                            data: awsData,
+                            backgroundColor: 'rgba(245, 158, 11, 0.45)',
+                            borderColor: 'rgba(245, 158, 11, 1)',
+                            borderWidth: 1.5,
+                            borderRadius: 6
+                        },
+                        {
+                            label: 'Azure Platform Solutions',
+                            data: azureData,
+                            backgroundColor: 'rgba(59, 130, 246, 0.45)',
+                            borderColor: 'rgba(59, 130, 246, 1)',
+                            borderWidth: 1.5,
+                            borderRadius: 6
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true } },
-                    plugins: { legend: { display: false } }
+                    plugins: {
+                        legend: { labels: { color: '#94a3b8', font: { weight: 'bold' } } }
+                    },
+                    scales: {
+                        x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                        y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' }, beginAtZero: true }
+                    }
                 }
             });
         }
 
         function exportToCSV() {
-            if (globalJobDetails.length === 0) {
-                alert("No active job data to export.");
-                return;
+            let csvContent = "data:text/csv;charset=utf-8,";
+            if (currentMode === 'live' && liveDataCached && liveDataCached.job_details) {
+                csvContent += "Metric,Context,AWS_Value,Azure_Value\n";
+                csvContent += `Hourly_Delta,Live,${liveDataCached.hourly_cost_aws},${liveDataCached.hourly_cost_azure}\n`;
+                liveDataCached.job_details.forEach(j => {
+                    csvContent += `Node_Allocation,${j.node},${j.aws_hourly},${j.azure_hourly}\n`;
+                });
+            } else {
+                csvContent += "Simulation Export,Parameters Active\n";
+                csvContent += `Total Evaluated Nodes,${document.getElementById('kpiNodes').innerText}\n`;
+                csvContent += `AWS Hourly Projection,${document.getElementById('kpiAws').innerText.replace('$', '')}\n`;
+                csvContent += `Azure Hourly Projection,${document.getElementById('kpiAzure').innerText.replace('$', '')}\n`;
             }
-            const headers = "Node,Mapped_Cloud_Instance,AWS_Hourly_Cost,Azure_Hourly_Cost\n";
-            const rows = globalJobDetails.map(job => 
-                `${job.node},${job.mapped_instance},${job.aws_hourly},${job.azure_hourly}`
-            ).join("\n");
-            
-            const blob = new Blob([headers + rows], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.setAttribute('hidden', '');
-            a.setAttribute('href', url);
-            a.setAttribute('download', 'cluster_cost_export.csv');
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `hpc_cost_matrix_${currentMode}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
-        // Fetch immediately, then every 5 minutes (300,000 ms)
-        fetchData();
-        setInterval(fetchData, 300000);
+        // Initialize polling intervals
+        fetchLiveMetrics();
+        setInterval(fetchLiveMetrics, 300000);
     </script>
 </body>
 </html>

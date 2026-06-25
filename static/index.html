@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HPC Cloud Cost Comparator</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>HPC Cloud Cost Comparator</h1>
+            <p>Real-time cost analysis of on-premise HPC jobs if run on AWS vs. Azure</p>
+        </header>
+
+        <main>
+            <section class="kpi-section">
+                <div class="kpi-card">
+                    <h2>Active Jobs</h2>
+                    <p id="active-jobs">0</p>
+                </div>
+                <div class="kpi-card">
+                    <h2>AWS Hourly Cost</h2>
+                    <p id="aws-cost">$0.00</p>
+                </div>
+                <div class="kpi-card">
+                    <h2>Azure Hourly Cost</h2>
+                    <p id="azure-cost">$0.00</p>
+                </div>
+            </section>
+
+            <section class="chart-section">
+                <div class="chart-container">
+                    <h2>Cost Comparison</h2>
+                    <canvas id="cost-chart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h2>Instance Distribution</h2>
+                    <canvas id="instance-chart"></canvas>
+                </div>
+            </section>
+
+            <section class="details-section">
+                <h2>Active Job Details</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Node</th>
+                                <th>Mapped Instance</th>
+                                <th>AWS Hourly</th>
+                                <th>Azure Hourly</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobs-table-body">
+                            <!-- Rows will be inserted here by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Last Updated: <span id="last-updated">Never</span></p>
+        </footer>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

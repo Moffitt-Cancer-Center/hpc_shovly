@@ -76,25 +76,42 @@ def get_cloud_mapping(hardware):
 
 async def fetch_azure_price(sku_name: str) -> float:
     """Fetches real-time consumption pricing from Azure's open API."""
-    # Note: For production, you would map exact Azure armSkuNames. 
+    # Note: For production, you would map exact Azure armSkuNames.
     # This uses a safe estimation fallback if the API rate limits.
     return AWS_RATES.get(sku_name, 0.0) * 0.95 # Azure is typically slightly offset from AWS
 
 def get_active_slurm_nodes():
-    """Queries Slurm for currently allocated nodes."""
+    """Queries Slurm for running jobs, expands compressed node ranges,
+
+    and returns a unique set of individual active hostnames.
+    """
     try:
-        # Query active jobs and print just the nodelist
+        # 1. Get raw nodelists from all running jobs
         result = subprocess.run(
-            ['squeue', '-h', '-t', 'RUNNING', '-o', '%N'], 
+            ['squeue', '-h', '-t', 'RUNNING', '-o', '%N'],
             capture_output=True, text=True, check=True
         )
-        # In a real environment, you'd use 'scontrol show hostnames' to expand nodes like node[001-005]
-        # For simplicity, we assume single node parsing or pre-expanded lists here.
-        nodes = result.stdout.strip().split('\n')
-        return [n for n in nodes if n]
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        # Fallback Mock Data for testing on non-Slurm machines (e.g., your laptop)
-        return ["concordia-node01", "concordia-node02", "dgx-node01"]
+
+        # 2. Join them into a single string to pass to scontrol
+        raw_nodelists = result.stdout.strip()
+        if not raw_nodelists:
+            return []
+
+        # 3. Use scontrol to expand ranges like node[001-012,015] into individual lines
+        expanded = subprocess.run(
+            ['scontrol', 'show', 'hostnames', raw_nodelists],
+            capture_output=True, text=True, check=True
+        )
+
+        # 4. Split by newline and convert to a set to eliminate duplicate entries
+        # (e.g., if multiple jobs are packing into the same node)
+        unique_nodes = list(set(line.strip() for line in expanded.stdout.splitlines() if line.strip()))
+        return unique_nodes
+
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        logger.error(f"Slurm command failed: {e}. Falling back to inventory simulation.")
+        # Return fallback for testing environments
+        return []
 
 async def update_metrics_loop():
     """Background task that updates costs every 5 minutes."""
@@ -102,7 +119,7 @@ async def update_metrics_loop():
         logger.info("Updating HPC Cost Metrics...")
         APP_STATE["inventory"] = load_inventory()
         active_nodes = get_active_slurm_nodes()
-        
+
         current_aws_cost = 0.0
         current_azure_cost = 0.0
         job_details = []
@@ -110,7 +127,7 @@ async def update_metrics_loop():
         for node in active_nodes:
             hardware = APP_STATE["inventory"].get(node, {"cores": 32, "ram_gb": 128, "gpu_count": 0})
             instance_type = get_cloud_mapping(hardware)
-            
+
             aws_price = AWS_RATES.get(instance_type, 0.0)
             azure_price = await fetch_azure_price(instance_type)
 
@@ -129,7 +146,7 @@ async def update_metrics_loop():
         APP_STATE["hourly_cost_azure"] = round(current_azure_cost, 2)
         APP_STATE["job_details"] = job_details
         APP_STATE["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         # Wait 5 minutes
         await asyncio.sleep(300)
 

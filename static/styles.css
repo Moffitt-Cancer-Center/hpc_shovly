@@ -1,0 +1,143 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #1a1a2e;
+    color: #e0e0e0;
+    margin: 0;
+    padding: 20px;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: #162447;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+}
+
+header {
+    text-align: center;
+    margin-bottom: 40px;
+    border-bottom: 1px solid #1f4068;
+    padding-bottom: 20px;
+}
+
+header h1 {
+    color: #1f77b4; /* A brighter blue for the main title */
+    margin-bottom: 0.5rem;
+}
+
+header p {
+    color: #a0a0a0;
+    font-size: 1.1rem;
+}
+
+.kpi-section {
+    display: flex;
+    justify-content: space-around;
+    gap: 20px;
+    margin-bottom: 40px;
+}
+
+.kpi-card {
+    background-color: #1f4068;
+    padding: 25px;
+    border-radius: 8px;
+    text-align: center;
+    flex-grow: 1;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.kpi-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+}
+
+.kpi-card h2 {
+    margin-top: 0;
+    color: #e0e0e0;
+    font-size: 1.2rem;
+}
+
+.kpi-card p {
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin-bottom: 0;
+    color: #4db6ac; /* Teal color for numbers */
+}
+
+.chart-section {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 40px;
+}
+
+.chart-container {
+    background-color: #1f4068;
+    padding: 20px;
+    border-radius: 8px;
+    width: 50%;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.chart-container h2 {
+    text-align: center;
+    margin-top: 0;
+    color: #e0e0e0;
+}
+
+.details-section {
+    background-color: #1f4068;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.details-section h2 {
+    text-align: center;
+    margin-top: 0;
+    color: #e0e0e0;
+}
+
+.table-container {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead {
+    background-color: #162447;
+    position: sticky;
+    top: 0;
+}
+
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #162447;
+}
+
+th {
+    color: #4db6ac;
+}
+
+tbody tr:nth-child(even) {
+    background-color: #1b3a5e;
+}
+
+tbody tr:hover {
+    background-color: #2a528a;
+}
+
+footer {
+    text-align: center;
+    margin-top: 40px;
+    color: #a0a0a0;
+    font-style: italic;
+}
