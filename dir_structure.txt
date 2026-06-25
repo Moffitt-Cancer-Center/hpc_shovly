@@ -3,7 +3,15 @@ hpc-cost-comparator/
 ├── docker-compose.yml
 ├── requirements.txt
 ├── app.py
+├── agent.py
+├── run_agent.sh
+├── dump_history.sh
+├── import_history.py
 ├── data/
-│   └── cluster_inventory.csv  (Output from your pdsh script)
+│   ├── historical.db          (SQLite — auto-created on first run)
+│   └── sacct_raw.csv          (Output from dump_history.sh)
 └── static/
-    └── index.html
+    ├── index.html
+    ├── app.js
+    ├── styles.css
+    └── chart.min.js
