@@ -1,5 +1,6 @@
 # agent.py
 import os
+import re
 import subprocess
 import logging
 import argparse
@@ -151,6 +152,59 @@ def parse_sacct_timestamp(ts_str):
         return 0
 
 
+def parse_nodelist_first(nodelist_str):
+    """
+    Extract the first node name from a Slurm compressed NodeList string.
+    Examples:
+      'hpctpa3pc0001'             -> 'hpctpa3pc0001'
+      'hpctpa3pc[0001-0005]'      -> 'hpctpa3pc0001'
+      'node[01,03-05],gpu01'      -> 'node01'
+    """
+    s = nodelist_str.strip()
+    if not s or s.lower() in ('n/a', 'none', ''):
+        return ''
+    first = s.split(',')[0].strip()
+    # Handle range notation: basename[FIRST-...] -> basename + FIRST
+    m = re.match(r'^([A-Za-z0-9._-]+)\[(\d+)', first)
+    return (m.group(1) + m.group(2)) if m else first
+
+
+def build_node_gpu_map(slurm_bin_dir=None):
+    """
+    Runs 'scontrol show nodes' and returns a dict mapping short hostname to
+    GPU model string: {'hpctpa3pc0001': 'a30', ...}
+    Parses the Gres field — requires that the GRES name includes the model
+    (e.g. 'gpu:a30:3'). Nodes with only a generic count ('gpu:3') are omitted.
+    """
+    scontrol = get_cmd(slurm_bin_dir, 'scontrol')
+    try:
+        result = subprocess.run(
+            [scontrol, 'show', 'nodes'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+        )
+        node_gpu_map = {}
+        current_node = None
+        for line in result.stdout.decode('utf-8').splitlines():
+            line = line.strip()
+            nm = re.search(r'NodeName=(\S+)', line)
+            if nm:
+                current_node = nm.group(1).split('.')[0]  # short hostname
+                continue
+            # Match Gres=...gpu:MODEL:COUNT...  (model must start with a letter)
+            if 'Gres=' in line and current_node:
+                models = re.findall(r'gpu:([A-Za-z][A-Za-z0-9_]*):\d+', line)
+                if models:
+                    node_gpu_map[current_node] = models[0].lower()
+        logger.info("Node GPU map built: %d GPU nodes identified.", len(node_gpu_map))
+        return node_gpu_map
+    except FileNotFoundError:
+        logger.warning("scontrol not found at '%s'. Node GPU map unavailable.", scontrol)
+        return {}
+    except subprocess.CalledProcessError as e:
+        logger.warning("scontrol show nodes failed: %s", e.stderr.decode('utf-8'))
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint management (tracks last sacct query so we don't re-import jobs)
 # ---------------------------------------------------------------------------
@@ -230,12 +284,14 @@ def get_running_jobs(slurm_bin_dir=None):
         return []
 
 
-def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None):
+def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None, node_gpu_map=None):
     """
     Queries sacct for jobs completed since checkpoint_ts (Unix timestamp).
     Returns a list of completed-job dicts for historical storage.
+    NodeList is included so GPU model can be resolved via the node map.
     """
     sacct = get_cmd(slurm_bin_dir, 'sacct')
+    node_gpu_map = node_gpu_map or {}
     start_str = time_module.strftime('%Y-%m-%dT%H:%M:%S', time_module.localtime(checkpoint_ts))
 
     try:
@@ -243,7 +299,7 @@ def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None):
             [sacct, '-a', '-P', '--noheader',
              '--starttime', start_str,
              '--state', 'COMPLETED,FAILED,CANCELLED,TIMEOUT',
-             '--format', 'JobID,User,Submit,Start,End,ReqCPUS,ReqMem,ReqTRES,ElapsedRaw,TimelimitRaw,State'],
+             '--format', 'JobID,User,Submit,Start,End,ReqCPUS,ReqMem,ReqTRES,ElapsedRaw,TimelimitRaw,State,NodeList'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
         output = result.stdout.decode('utf-8').strip()
@@ -253,7 +309,7 @@ def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None):
         jobs = []
         for line in output.splitlines():
             parts = line.strip().split('|')
-            if len(parts) != 11:
+            if len(parts) != 12:
                 continue
             job_id = parts[0].strip()
             if '.' in job_id:
@@ -279,20 +335,24 @@ def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None):
                 time_limit_min = 0
 
             gpu_count, gpu_model = parse_tres_gpu(parts[7])
+            # Resolve missing GPU model via node map (parts[11] = NodeList)
+            if gpu_count > 0 and not gpu_model and node_gpu_map:
+                first_node = parse_nodelist_first(parts[11])
+                gpu_model = node_gpu_map.get(first_node, '')
 
             jobs.append({
-                'job_id':        job_id,
-                'cluster':       cluster_name,
-                'username':      parts[1].strip(),
-                'start_time':    start_ts,
-                'end_time':      parse_sacct_timestamp(parts[4]),
-                'req_cpus':      req_cpus,
-                'req_mem_mb':    parse_sacct_mem_mb(parts[6]),
-                'gpu_count':     gpu_count,
-                'gpu_model':     gpu_model,
+                'job_id':         job_id,
+                'cluster':        cluster_name,
+                'username':       parts[1].strip(),
+                'start_time':     start_ts,
+                'end_time':       parse_sacct_timestamp(parts[4]),
+                'req_cpus':       req_cpus,
+                'req_mem_mb':     parse_sacct_mem_mb(parts[6]),
+                'gpu_count':      gpu_count,
+                'gpu_model':      gpu_model,
                 'time_limit_min': time_limit_min,
-                'elapsed_min':   elapsed_min,
-                'state':         parts[10].strip(),
+                'elapsed_min':    elapsed_min,
+                'state':          parts[10].strip(),
             })
         return jobs
 
@@ -318,21 +378,45 @@ def main():
         "--cluster-name", required=True,
         help="Unique name for this cluster (e.g., moffitt-hpc-1)"
     )
+    parser.add_argument(
+        "--default-gpu-model", default="", metavar="MODEL",
+        help="GPU model to assume when a job requested GPUs but GRES has no model type "
+             "(e.g. 'a30'). Use for clusters where users submit --gres=gpu:N without "
+             "specifying the model."
+    )
     args = parser.parse_args()
 
     slurm_bin_dir = os.environ.get('SLURM_BIN_DIR')
     if slurm_bin_dir:
         logger.info("Using custom Slurm binary path: %s", slurm_bin_dir)
 
+    # --- Build node→GPU map from scontrol (resolves GPU model for jobs that
+    #     didn't specify it in their --gres submission flag) ---
+    node_gpu_map = build_node_gpu_map(slurm_bin_dir)
+
     # --- Running jobs (for the live dashboard) ---
-    jobs = get_running_jobs(slurm_bin_dir)
+    jobs = get_running_jobs(slurm_bin_dir, node_gpu_map=node_gpu_map)
     logger.info("Found %d running jobs.", len(jobs))
+
+    # Apply --default-gpu-model as final fallback (node map takes priority)
+    if args.default_gpu_model:
+        for job in jobs:
+            if job["gpu_count"] > 0 and not job["gpu_model"]:
+                job["gpu_model"] = args.default_gpu_model
 
     # --- Completed jobs since last checkpoint (for historical DB) ---
     checkpoint_ts = load_checkpoint(args.cluster_name)
     now_ts = time_module.time()
-    completed_jobs = get_completed_jobs_since(checkpoint_ts, args.cluster_name, slurm_bin_dir)
+    completed_jobs = get_completed_jobs_since(
+        checkpoint_ts, args.cluster_name, slurm_bin_dir, node_gpu_map=node_gpu_map
+    )
     logger.info("Found %d completed jobs since last checkpoint.", len(completed_jobs))
+
+    # Apply --default-gpu-model as final fallback to completed jobs too
+    if args.default_gpu_model:
+        for job in completed_jobs:
+            if job["gpu_count"] > 0 and not job["gpu_model"]:
+                job["gpu_model"] = args.default_gpu_model
 
     payload = {
         "cluster_name":   args.cluster_name,

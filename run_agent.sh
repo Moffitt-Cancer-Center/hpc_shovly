@@ -24,6 +24,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SLURM_BIN_DIR="${SLURM_BIN_DIR:-/cm/shared/apps/slurm/current/bin}"
 DASHBOARD_URL="${DASHBOARD_URL:-http://red2.moffitt.org:8000/api/agent/data}"
 CLUSTER_NAME="${CLUSTER_NAME:-slurm}"
+# Set to the GPU model installed in this cluster's nodes (e.g. a30, a100, v100).
+# Only used as a fallback when a job requested GPUs but didn't specify the model type
+# (i.e. submitted with --gres=gpu:N rather than --gres=gpu:a30:N).
+# Leave blank for CPU-only clusters or clusters where all jobs specify the model.
+DEFAULT_GPU_MODEL="${DEFAULT_GPU_MODEL:-}"
 
 # --------------------------------------------------------------------------
 # Locate Python — prefer the local venv, fall back to system python3
@@ -51,4 +56,5 @@ export SLURM_BIN_DIR
 
 exec "$PYTHON" "$SCRIPT_DIR/agent.py" \
     "$DASHBOARD_URL" \
-    --cluster-name="$CLUSTER_NAME"
+    --cluster-name="$CLUSTER_NAME" \
+    ${DEFAULT_GPU_MODEL:+--default-gpu-model="$DEFAULT_GPU_MODEL"}

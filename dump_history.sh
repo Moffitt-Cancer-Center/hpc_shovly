@@ -28,7 +28,7 @@ CLUSTER_NAME="default"
 OUTPUT_FILE=""
 NO_CHUNK=0
 
-SACCT_FORMAT="JobID,User,Submit,Start,End,ReqCPUS,ReqMem,ReqTRES,ElapsedRaw,TimelimitRaw,State"
+SACCT_FORMAT="JobID,User,Submit,Start,End,ReqCPUS,ReqMem,ReqTRES,ElapsedRaw,TimelimitRaw,State,NodeList"
 
 # --------------------------------------------------------------------------
 # Argument parsing
@@ -94,6 +94,36 @@ echo "  Output:     $OUTPUT_FILE"
 echo "  Chunking:   $([ $NO_CHUNK -eq 1 ] && echo 'disabled (--no-chunk)' || echo 'monthly')"
 echo "========================================"
 
+# --------------------------------------------------------------------------
+# Generate node→GPU map via scontrol (used by import_history.py --node-gpu-map)
+# Captures which GPU model is installed in each node, so jobs that didn't
+# specify --gres=gpu:MODEL:N can still be costed accurately.
+# --------------------------------------------------------------------------
+if [ -n "$SLURM_BIN_DIR" ]; then
+    SCONTROL="${SLURM_BIN_DIR}/scontrol"
+else
+    SCONTROL="$(command -v scontrol 2>/dev/null)"
+fi
+
+NODE_GPU_MAP="$(dirname "$OUTPUT_FILE")/node_gpu_map.csv"
+
+if [ -n "$SCONTROL" ] && [ -x "$SCONTROL" ]; then
+    printf "Building node GPU map ... "
+    current_node=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ NodeName=([^[:space:]]+) ]]; then
+            current_node="${BASH_REMATCH[1]%%.*}"
+        fi
+        if [[ -n "$current_node" && "$line" =~ Gres=.*gpu:([A-Za-z][A-Za-z0-9_]*):[0-9]+ ]]; then
+            echo "${current_node}|${BASH_REMATCH[1],,}"
+        fi
+    done < <("$SCONTROL" show nodes 2>/dev/null) > "$NODE_GPU_MAP"
+    printf "%d GPU nodes written to %s\n" "$(wc -l < "$NODE_GPU_MAP")" "$NODE_GPU_MAP"
+else
+    echo "WARNING: scontrol not found — skipping node GPU map."
+    echo "         Set SLURM_BIN_DIR or add scontrol to PATH."
+fi
+
 TOTAL_BEFORE=$(wc -l < "$OUTPUT_FILE")
 
 # --------------------------------------------------------------------------
@@ -133,7 +163,7 @@ run_chunk() {
     raw_lines=$(wc -l < "$tmp_out")
 
     awk -F'|' -v cluster="$CLUSTER_NAME" \
-        'NF==11 && $1 !~ /\./ && $4 != "Unknown" && $4 != "" { print $0 "|" cluster }' \
+        'NF==12 && $1 !~ /\./ && $4 != "Unknown" && $4 != "" { print $0 "|" cluster }' \
         "$tmp_out" >> "$OUTPUT_FILE"
 
     local filtered
@@ -208,8 +238,11 @@ echo "========================================"
 echo "  Done."
 echo "  New records appended: $NEW_RECORDS"
 echo "  Total records in file: $TOTAL_AFTER"
-echo "  Output: $OUTPUT_FILE"
+echo "  Sacct CSV:    $OUTPUT_FILE"
+echo "  Node GPU map: ${NODE_GPU_MAP:-'(not generated)'}"
 echo "========================================"
 echo ""
 echo "Next step — import into Shovly:"
-echo "  python3 import_history.py ${OUTPUT_FILE} --db data/historical.db"
+echo "  python3 import_history.py ${OUTPUT_FILE} \\"
+echo "      --node-gpu-map ${NODE_GPU_MAP:-data/node_gpu_map.csv} \\"
+echo "      --db data/historical.db"
