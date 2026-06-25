@@ -118,11 +118,17 @@ document.addEventListener('DOMContentLoaded', () => {
             jobsTableBody.innerHTML = ''; // Clear existing rows
             data.job_details.forEach(job => {
                 const row = document.createElement('tr');
+                const gpuLabel = job.gpu_count > 0 ? `${job.gpu_count}x ${job.gpu_model}` : '—';
                 row.innerHTML = `
-                    <td>${job.node}</td>
-                    <td>${job.mapped_instance}</td>
-                    <td>$${job.aws_hourly.toFixed(2)}</td>
-                    <td>$${job.azure_hourly.toFixed(2)}</td>
+                    <td>${job.job_id}</td>
+                    <td>${job.cluster}</td>
+                    <td>${job.cpus}</td>
+                    <td>${job.mem_gb}</td>
+                    <td>${gpuLabel}</td>
+                    <td>${job.aws_instance}</td>
+                    <td>$${job.aws_hourly.toFixed(3)}</td>
+                    <td>${job.azure_instance}</td>
+                    <td>$${job.azure_hourly.toFixed(3)}</td>
                 `;
                 jobsTableBody.appendChild(row);
             });
