@@ -21,11 +21,11 @@
                     <p id="active-jobs">0</p>
                 </div>
                 <div class="kpi-card">
-                    <h2>AWS Hourly Cost</h2>
+                    <h2>AWS Projected Cost</h2>
                     <p id="aws-cost">$0.00</p>
                 </div>
                 <div class="kpi-card">
-                    <h2>Azure Hourly Cost</h2>
+                    <h2>Azure Projected Cost</h2>
                     <p id="azure-cost">$0.00</p>
                 </div>
             </section>
@@ -52,15 +52,62 @@
                                 <th>CPUs</th>
                                 <th>Mem (GB)</th>
                                 <th>GPUs</th>
+                                <th>Time Limit</th>
                                 <th>AWS Instance</th>
-                                <th>AWS Hourly</th>
+                                <th>AWS Projected</th>
                                 <th>Azure Instance</th>
-                                <th>Azure Hourly</th>
+                                <th>Azure Projected</th>
                             </tr>
                         </thead>
                         <tbody id="jobs-table-body">
                             <!-- Rows will be inserted here by JavaScript -->
                         </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Historical Cost Calculator -->
+            <section class="historical-section">
+                <h2>Historical Cost Calculator</h2>
+                <div class="controls-row">
+                    <label for="hist-cluster">Cluster:</label>
+                    <select id="hist-cluster">
+                        <option value="all">All Clusters</option>
+                    </select>
+                    <label for="hist-start">From:</label>
+                    <input type="date" id="hist-start">
+                    <label for="hist-end">To:</label>
+                    <input type="date" id="hist-end">
+                    <button class="action-btn" id="hist-calc-btn">Calculate</button>
+                </div>
+                <div class="hist-kpi-row">
+                    <div class="hist-kpi"><div class="label">Total Jobs</div><div class="value" id="hist-total-jobs">&mdash;</div></div>
+                    <div class="hist-kpi"><div class="label">AWS Total</div><div class="value" id="hist-aws-total">&mdash;</div></div>
+                    <div class="hist-kpi"><div class="label">Azure Total</div><div class="value" id="hist-azure-total">&mdash;</div></div>
+                    <div class="hist-kpi"><div class="label">Compute Hours</div><div class="value" id="hist-compute-hours">&mdash;</div></div>
+                </div>
+                <div class="chart-container full-width">
+                    <canvas id="historical-chart"></canvas>
+                </div>
+            </section>
+
+            <!-- Top 50 Users -->
+            <section class="top-users-section">
+                <h2>Top 50 Users by Compute Hours</h2>
+                <p class="status-msg" id="users-status">Select a date range above and click Calculate.</p>
+                <div class="table-container">
+                    <table id="users-table" style="display:none">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Username</th>
+                                <th>Jobs</th>
+                                <th>Compute Hours</th>
+                                <th>AWS Cost</th>
+                                <th>Azure Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body"></tbody>
                     </table>
                 </div>
             </section>

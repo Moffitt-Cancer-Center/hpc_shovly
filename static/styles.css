@@ -141,3 +141,125 @@ footer {
     color: #a0a0a0;
     font-style: italic;
 }
+
+/* ------------------------------------------------------------------ */
+/* Historical Cost Calculator & Top 50 Users panels                    */
+/* ------------------------------------------------------------------ */
+
+.historical-section,
+.top-users-section {
+    background-color: #1f4068;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    margin-top: 30px;
+}
+
+.historical-section h2,
+.top-users-section h2 {
+    text-align: center;
+    margin-top: 0;
+    color: #e0e0e0;
+}
+
+.controls-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.controls-row label {
+    color: #a0a0a0;
+    font-size: 0.9rem;
+}
+
+.controls-row input[type="date"],
+.controls-row select {
+    background-color: #162447;
+    color: #e0e0e0;
+    border: 1px solid #4db6ac;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+.controls-row input[type="date"]:focus,
+.controls-row select:focus {
+    border-color: #80cbc4;
+    box-shadow: 0 0 4px rgba(77, 182, 172, 0.4);
+}
+
+.action-btn {
+    background-color: #4db6ac;
+    color: #1a1a2e;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 22px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.action-btn:hover {
+    background-color: #80cbc4;
+}
+
+.action-btn:active {
+    transform: scale(0.97);
+}
+
+.action-btn:disabled {
+    background-color: #4d7b78;
+    cursor: not-allowed;
+}
+
+.hist-kpi-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 25px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.hist-kpi {
+    background-color: #162447;
+    border-radius: 6px;
+    padding: 14px 22px;
+    text-align: center;
+    flex: 1;
+    min-width: 120px;
+    max-width: 210px;
+}
+
+.hist-kpi .label {
+    color: #a0a0a0;
+    font-size: 0.85rem;
+    margin-bottom: 4px;
+}
+
+.hist-kpi .value {
+    color: #4db6ac;
+    font-size: 1.55rem;
+    font-weight: bold;
+}
+
+.chart-container.full-width {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.status-msg {
+    text-align: center;
+    color: #a0a0a0;
+    font-style: italic;
+    padding: 16px 0;
+}
+
+.top-users-section .table-container {
+    max-height: 500px;
+}
