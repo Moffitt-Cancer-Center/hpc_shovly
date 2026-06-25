@@ -127,9 +127,12 @@ def process_and_aggregate_metrics():
         total_active_nodes += len(active_nodes)
 
         for node in active_nodes:
-            hardware = APP_STATE["inventory"].get(node) # Try to get the hardware
+            # Strip domain from FQDN to match inventory short hostnames
+            short_node_name = node.split('.')[0]
+
+            hardware = APP_STATE["inventory"].get(short_node_name) # Try to get the hardware
             if not hardware:
-                logger.warning(f"Node '{node}' from cluster '{cluster_name}' not found in inventory. Using default hardware specs.")
+                logger.warning(f"Node '{short_node_name}' (from original '{node}') not found in inventory. Using default hardware specs.")
                 hardware = {"cores": 32, "ram_gb": 128, "gpu_count": 0} # Fallback
             
             instance_type = get_cloud_mapping(hardware)
