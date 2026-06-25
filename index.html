@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HPC to Cloud Cost Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans p-6 min-h-screen">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-slate-200">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900">Cluster Infrastructure vs. Cloud</h1>
+                <p class="text-sm text-slate-500 mt-1">Live equivalent hourly cost for active workloads</p>
+            </div>
+            <button onclick="exportToCSV()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded shadow transition">
+                Download CSV
+            </button>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+                <h3 class="text-slate-500 text-sm font-medium">Active Nodes</h3>
+                <p id="activeNodes" class="text-4xl font-bold mt-2">-</p>
+                <p class="text-xs text-slate-400 mt-2">Currently running jobs</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+                <h3 class="text-slate-500 text-sm font-medium">AWS Equivalent Cost</h3>
+                <p id="awsCost" class="text-4xl font-bold text-amber-600 mt-2">$-</p>
+                <p class="text-xs text-slate-400 mt-2">per hour</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+                <h3 class="text-slate-500 text-sm font-medium">Azure Equivalent Cost</h3>
+                <p id="azureCost" class="text-4xl font-bold text-blue-600 mt-2">$-</p>
+                <p class="text-xs text-slate-400 mt-2">per hour</p>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-8 h-96">
+            <canvas id="costChart"></canvas>
+        </div>
+
+        <p class="text-xs text-center text-slate-400" id="lastUpdated">Last Updated: Loading...</p>
+    </div>
+
+    <script>
+        let costChart = null;
+        let globalJobDetails = [];
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/metrics');
+                const data = await response.json();
+                
+                document.getElementById('activeNodes').innerText = data.active_jobs;
+                document.getElementById('awsCost').innerText = '$' + data.hourly_cost_aws;
+                document.getElementById('azureCost').innerText = '$' + data.hourly_cost_azure;
+                document.getElementById('lastUpdated').innerText = 'Last Updated: ' + data.last_updated;
+                
+                globalJobDetails = data.job_details;
+                updateChart(data.hourly_cost_aws, data.hourly_cost_azure);
+            } catch (error) {
+                console.error("Error fetching metrics:", error);
+            }
+        }
+
+        function updateChart(aws, azure) {
+            const ctx = document.getElementById('costChart').getContext('2d');
+            if (costChart) {
+                costChart.data.datasets[0].data = [aws, azure];
+                costChart.update();
+                return;
+            }
+            costChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['AWS (On-Demand)', 'Azure (Consumption)'],
+                    datasets: [{
+                        label: 'Hourly Cost ($)',
+                        data: [aws, azure],
+                        backgroundColor: ['rgba(245, 158, 11, 0.7)', 'rgba(37, 99, 235, 0.7)'],
+                        borderColor: ['rgb(217, 119, 6)', 'rgb(29, 78, 216)'],
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function exportToCSV() {
+            if (globalJobDetails.length === 0) {
+                alert("No active job data to export.");
+                return;
+            }
+            const headers = "Node,Mapped_Cloud_Instance,AWS_Hourly_Cost,Azure_Hourly_Cost\n";
+            const rows = globalJobDetails.map(job => 
+                `${job.node},${job.mapped_instance},${job.aws_hourly},${job.azure_hourly}`
+            ).join("\n");
+            
+            const blob = new Blob([headers + rows], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('hidden', '');
+            a.setAttribute('href', url);
+            a.setAttribute('download', 'cluster_cost_export.csv');
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // Fetch immediately, then every 5 minutes (300,000 ms)
+        fetchData();
+        setInterval(fetchData, 300000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  cost-comparator:
+    build: .
+    container_name: hpc_cost_comparator
+    ports:
+      - "8000:8000"
+    volumes:
+      # Map your host data folder to ensure the CSV updates without rebuilding
+      - ./data:/app/data
+    restart: unless-stopped

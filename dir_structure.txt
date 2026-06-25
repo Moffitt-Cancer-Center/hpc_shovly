@@ -1,0 +1,9 @@
+hpc-cost-comparator/
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── app.py
+├── data/
+│   └── cluster_inventory.csv  (Output from your pdsh script)
+└── static/
+    └── index.html
