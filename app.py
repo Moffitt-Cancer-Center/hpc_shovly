@@ -3,29 +3,37 @@ import asyncio
 import csv
 import json
 import logging
-import subprocess
-from datetime import datetime
-from fastapi import FastAPI
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="HPC Cloud Cost Comparator")
 
-# Global state to hold the latest metrics
+# --- Pydantic Models for API Data ---
+class AgentPayload(BaseModel):
+    cluster_name: str
+    active_nodes: List[str]
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+# --- Global State Management ---
+# The state now holds data per cluster and tracks agent heartbeats.
 APP_STATE = {
     "last_updated": None,
-    "active_jobs": 0,
-    "on_prem_nodes_in_use": 0,
+    "clusters": {}, # e.g., {"cluster-a": {"active_nodes": [], "last_seen": ...}}
+    "inventory": {},
+    # Aggregated metrics will be calculated from the "clusters" dict
+    "total_active_jobs": 0,
     "hourly_cost_aws": 0.0,
     "hourly_cost_azure": 0.0,
-    "inventory": {},
     "job_details": []
 }
+AGENT_TIMEOUT_MINUTES = 10
 
 # Baseline AWS Pricing (Fallback for Zero-Auth Local Deployment)
 AWS_RATES = {
@@ -80,83 +88,99 @@ async def fetch_azure_price(sku_name: str) -> float:
     # This uses a safe estimation fallback if the API rate limits.
     return AWS_RATES.get(sku_name, 0.0) * 0.95 # Azure is typically slightly offset from AWS
 
-def get_active_slurm_nodes():
-    """Queries Slurm for running jobs, expands compressed node ranges,
+# --- New Endpoint to Receive Agent Data ---
+@app.post("/api/agent/data")
+async def receive_agent_data(payload: AgentPayload):
+    """Endpoint for agents to post their Slurm data."""
+    logger.info(f"Received data from agent on cluster: {payload.cluster_name}")
+    APP_STATE["clusters"][payload.cluster_name] = {
+        "active_nodes": payload.active_nodes,
+        "last_seen": datetime.utcnow()
+    }
+    return {"status": "success", "message": f"Data for {payload.cluster_name} received."}
 
-    and returns a unique set of individual active hostnames.
+
+def process_and_aggregate_metrics():
     """
-    try:
-        # 1. Get raw nodelists from all running jobs
-        result = subprocess.run(
-            ['squeue', '-h', '-t', 'RUNNING', '-o', '%N'],
-            capture_output=True, text=True, check=True
-        )
+    Processes the collected agent data in APP_STATE to calculate aggregate costs.
+    This function replaces the direct Slurm query.
+    """
+    # Prune stale agents first
+    now = datetime.utcnow()
+    stale_clusters = [
+        name for name, data in APP_STATE["clusters"].items()
+        if now - data["last_seen"] > timedelta(minutes=AGENT_TIMEOUT_MINUTES)
+    ]
+    for name in stale_clusters:
+        logger.warning(f"Agent for cluster '{name}' is stale. Removing from metrics.")
+        del APP_STATE["clusters"][name]
 
-        # 2. Join them into a single string to pass to scontrol
-        raw_nodelists = result.stdout.strip()
-        if not raw_nodelists:
-            return []
+    # Now, calculate metrics from active agents
+    current_aws_cost = 0.0
+    current_azure_cost = 0.0
+    job_details = []
+    total_active_nodes = 0
 
-        # 3. Use scontrol to expand ranges like node[001-012,015] into individual lines
-        expanded = subprocess.run(
-            ['scontrol', 'show', 'hostnames', raw_nodelists],
-            capture_output=True, text=True, check=True
-        )
-
-        # 4. Split by newline and convert to a set to eliminate duplicate entries
-        # (e.g., if multiple jobs are packing into the same node)
-        unique_nodes = list(set(line.strip() for line in expanded.stdout.splitlines() if line.strip()))
-        return unique_nodes
-
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        logger.error(f"Slurm command failed: {e}. Falling back to inventory simulation.")
-        # Return fallback for testing environments
-        return []
-
-async def update_metrics_loop():
-    """Background task that updates costs every 5 minutes."""
-    while True:
-        logger.info("Updating HPC Cost Metrics...")
-        APP_STATE["inventory"] = load_inventory()
-        active_nodes = get_active_slurm_nodes()
-
-        current_aws_cost = 0.0
-        current_azure_cost = 0.0
-        job_details = []
+    for cluster_name, data in APP_STATE["clusters"].items():
+        active_nodes = data["active_nodes"]
+        total_active_nodes += len(active_nodes)
 
         for node in active_nodes:
             hardware = APP_STATE["inventory"].get(node, {"cores": 32, "ram_gb": 128, "gpu_count": 0})
             instance_type = get_cloud_mapping(hardware)
 
             aws_price = AWS_RATES.get(instance_type, 0.0)
-            azure_price = await fetch_azure_price(instance_type)
+            # The original async call is now made sync inside the loop for simplicity
+            azure_price = AWS_RATES.get(instance_type, 0.0) * 0.95
 
             current_aws_cost += aws_price
             current_azure_cost += azure_price
 
             job_details.append({
-                "node": node,
+                "node": f"{cluster_name}/{node}", # Prefix node with cluster name
                 "mapped_instance": instance_type,
                 "aws_hourly": aws_price,
                 "azure_hourly": azure_price
             })
 
-        APP_STATE["active_jobs"] = len(active_nodes)
-        APP_STATE["hourly_cost_aws"] = round(current_aws_cost, 2)
-        APP_STATE["hourly_cost_azure"] = round(current_azure_cost, 2)
-        APP_STATE["job_details"] = job_details
-        APP_STATE["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    APP_STATE["total_active_jobs"] = total_active_nodes
+    APP_STATE["hourly_cost_aws"] = round(current_aws_cost, 2)
+    APP_STATE["hourly_cost_azure"] = round(current_azure_cost, 2)
+    APP_STATE["job_details"] = job_details
+    APP_STATE["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Wait 5 minutes
-        await asyncio.sleep(300)
+
+async def update_metrics_loop():
+    """Background task that updates costs every 10 seconds based on agent data."""
+    while True:
+        logger.info("Processing agent data to update HPC Cost Metrics...")
+        
+        # Load inventory once at the start of the loop
+        if not APP_STATE["inventory"]:
+             APP_STATE["inventory"] = load_inventory()
+
+        process_and_aggregate_metrics()
+
+        # Wait 10 seconds
+        await asyncio.sleep(10)
 
 @app.on_event("startup")
 async def startup_event():
+    # Load inventory on startup
+    APP_STATE["inventory"] = load_inventory()
+    # Start the background processing loop
     asyncio.create_task(update_metrics_loop())
 
 @app.get("/api/metrics")
 async def get_metrics():
-    return JSONResponse(content=APP_STATE)
+    # The structure returned to the frontend needs to match what it expects
+    return JSONResponse(content={
+        "active_jobs": APP_STATE["total_active_jobs"],
+        "hourly_cost_aws": APP_STATE["hourly_cost_aws"],
+        "hourly_cost_azure": APP_STATE["hourly_cost_azure"],
+        "job_details": APP_STATE["job_details"],
+        "last_updated": APP_STATE["last_updated"],
+    })
 
 # Mount the static directory to serve the frontend
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
