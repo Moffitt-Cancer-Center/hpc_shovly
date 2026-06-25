@@ -152,13 +152,12 @@ def process_and_aggregate_metrics():
 
 async def update_metrics_loop():
     """Background task that updates costs every 10 seconds based on agent data."""
+    # Load inventory once on startup of the loop
+    APP_STATE["inventory"] = load_inventory()
+    
     while True:
         logger.info("Processing agent data to update HPC Cost Metrics...")
         
-        # Load inventory once at the start of the loop
-        if not APP_STATE["inventory"]:
-             APP_STATE["inventory"] = load_inventory()
-
         process_and_aggregate_metrics()
 
         # Wait 10 seconds
