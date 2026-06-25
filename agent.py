@@ -28,7 +28,7 @@ def get_active_slurm_nodes(slurm_bin_dir=None):
     try:
         result = subprocess.run(
             [squeue_cmd, '-h', '-t', 'RUNNING', '-o', '%N'],
-            capture_output=True, text=True, check=True
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
         )
         raw_nodelists = result.stdout.strip()
         if not raw_nodelists:
@@ -36,7 +36,7 @@ def get_active_slurm_nodes(slurm_bin_dir=None):
 
         expanded = subprocess.run(
             [scontrol_cmd, 'show', 'hostnames', raw_nodelists],
-            capture_output=True, text=True, check=True
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
         )
         
         unique_nodes = list(set(line.strip() for line in expanded.stdout.splitlines() if line.strip()))
