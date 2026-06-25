@@ -123,10 +123,15 @@ def process_and_aggregate_metrics():
 
     for cluster_name, data in APP_STATE["clusters"].items():
         active_nodes = data["active_nodes"]
+        logger.info(f"Processing {len(active_nodes)} nodes from cluster '{cluster_name}'.")
         total_active_nodes += len(active_nodes)
 
         for node in active_nodes:
-            hardware = APP_STATE["inventory"].get(node, {"cores": 32, "ram_gb": 128, "gpu_count": 0})
+            hardware = APP_STATE["inventory"].get(node) # Try to get the hardware
+            if not hardware:
+                logger.warning(f"Node '{node}' from cluster '{cluster_name}' not found in inventory. Using default hardware specs.")
+                hardware = {"cores": 32, "ram_gb": 128, "gpu_count": 0} # Fallback
+            
             instance_type = get_cloud_mapping(hardware)
 
             aws_price = AWS_RATES.get(instance_type, 0.0)
