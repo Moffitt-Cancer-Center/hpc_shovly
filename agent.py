@@ -28,25 +28,25 @@ def get_active_slurm_nodes(slurm_bin_dir=None):
     try:
         result = subprocess.run(
             [squeue_cmd, '-h', '-t', 'RUNNING', '-o', '%N'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
-        raw_nodelists = result.stdout.strip()
+        raw_nodelists = result.stdout.decode('utf-8').strip()
         if not raw_nodelists:
             return []
 
         expanded = subprocess.run(
             [scontrol_cmd, 'show', 'hostnames', raw_nodelists],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
         
-        unique_nodes = list(set(line.strip() for line in expanded.stdout.splitlines() if line.strip()))
+        unique_nodes = list(set(line.strip() for line in expanded.stdout.decode('utf-8').splitlines() if line.strip()))
         return unique_nodes
 
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
         logger.error(f"Slurm command failed: {e}")
         if isinstance(e, subprocess.CalledProcessError):
-            logger.error(f"Slurm command stdout: {e.stdout}")
-            logger.error(f"Slurm command stderr: {e.stderr}")
+            logger.error(f"Slurm command stdout: {e.stdout.decode('utf-8')}")
+            logger.error(f"Slurm command stderr: {e.stderr.decode('utf-8')}")
         return []
 
 def main():
