@@ -150,6 +150,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
+            applySortIfActive('jobs-table');
+
         } catch (error) {
             console.error("Failed to fetch metrics:", error);
         }
@@ -164,6 +166,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateDashboard();
     setInterval(updateDashboard, 5000);
+
+    initSortableTable('jobs-table');
+    initSortableTable('users-table');
 
     // ----------------------------------------------------------------
     // Historical Cost Calculator
@@ -223,6 +228,72 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatCurrency(n) {
         return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // ----------------------------------------------------------------
+    // Sortable table utility
+    // ----------------------------------------------------------------
+    const _sortState = {};  // { tableId: { colIndex, asc } }
+
+    function _parseSortVal(text) {
+        const s = text.trim().replace(/[$,]/g, '');
+        if (s === '\u2014' || s === '' || s === '-') return null; // em-dash / empty → sort to end
+        const tm = s.match(/^(\d+)h\s+(\d+)m$/);
+        if (tm) return parseInt(tm[1]) * 60 + parseInt(tm[2]);    // "2h 30m" → minutes
+        const n = parseFloat(s);
+        return isNaN(n) ? s.toLowerCase() : n;
+    }
+
+    function sortTable(tableId, colIndex, headers, forceAsc) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        const prev = _sortState[tableId] || {};
+        const asc  = forceAsc !== undefined ? forceAsc
+                   : (prev.colIndex === colIndex ? !prev.asc : true);
+        _sortState[tableId] = { colIndex, asc };
+
+        rows.sort((a, b) => {
+            const av = _parseSortVal(a.cells[colIndex]?.textContent || '');
+            const bv = _parseSortVal(b.cells[colIndex]?.textContent || '');
+            if (av === null && bv === null) return 0;
+            if (av === null) return  1;
+            if (bv === null) return -1;
+            if (typeof av === 'number' && typeof bv === 'number') return asc ? av - bv : bv - av;
+            return asc ? String(av).localeCompare(String(bv))
+                       : String(bv).localeCompare(String(av));
+        });
+
+        rows.forEach(r => tbody.appendChild(r));
+
+        headers.forEach(th => { const a = th.querySelector('.sort-arrow'); if (a) a.textContent = ''; });
+        const activeTh = headers[colIndex];
+        if (activeTh) {
+            let arrow = activeTh.querySelector('.sort-arrow');
+            if (!arrow) { arrow = document.createElement('span'); arrow.className = 'sort-arrow'; activeTh.appendChild(arrow); }
+            arrow.textContent = asc ? ' \u25b2' : ' \u25bc';
+        }
+    }
+
+    function initSortableTable(tableId) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        const headers = Array.from(table.querySelectorAll('thead th'));
+        headers.forEach((th, i) => {
+            th.classList.add('sortable');
+            th.addEventListener('click', () => sortTable(tableId, i, headers));
+        });
+    }
+
+    function applySortIfActive(tableId) {
+        const state = _sortState[tableId];
+        if (!state) return;
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        sortTable(tableId, state.colIndex, Array.from(table.querySelectorAll('thead th')), state.asc);
     }
 
     async function fetchHistorical() {
@@ -296,6 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
                 tbody.appendChild(tr);
             });
+            applySortIfActive('users-table');
         } catch (e) {
             console.error('Top-users fetch failed:', e);
         }

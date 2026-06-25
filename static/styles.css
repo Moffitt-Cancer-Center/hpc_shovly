@@ -127,6 +127,22 @@ th {
     color: #4db6ac;
 }
 
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+th.sortable:hover {
+    color: #80cbc4;
+}
+
+.sort-arrow {
+    font-size: 0.7rem;
+    opacity: 0.75;
+    pointer-events: none;
+}
+
 tbody tr:nth-child(even) {
     background-color: #1b3a5e;
 }
