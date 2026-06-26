@@ -259,36 +259,45 @@ def save_checkpoint(cluster_name, ts):
 # Slurm queries
 # ---------------------------------------------------------------------------
 
-def _get_tres_by_job(squeue_cmd):
+def _get_gpu_tres_by_job(slurm_bin_dir):
     """
-    Fetch ReqTRES for every RUNNING job via squeue --Format.
-    Returns a dict {job_id: tres_string}.
+    Query sacct for the ReqTRES of every currently RUNNING job.
+    Returns {job_id: (gpu_count, gpu_model)} for jobs that have GPU resources.
 
-    Uses --Format (long-form) because the short -o format has no TRES code.
-    Field width 500 prevents truncation on jobs with many TRES entries.
-    Falls back gracefully to an empty dict if --Format is not supported
-    by this Slurm version.
+    sacct is the authoritative TRES source — the same data scontrol show job
+    exposes in ReqTRES/AllocTRES.  It reliably captures jobs submitted with
+    --gres=gpu:N, --gpus=N, or any other GPU-request mechanism, regardless of
+    what squeue %b (GRES field) reports.
+
+    Falls back to an empty dict on any error so the caller can degrade
+    gracefully to the squeue %b heuristic.
     """
+    sacct = get_cmd(slurm_bin_dir, 'sacct')
     try:
         result = subprocess.run(
-            [squeue_cmd, '-h', '-t', 'RUNNING',
-             '--Format=JobID:|,tres-req:500'],
+            [sacct, '-a', '-P', '--noheader', '--state=RUNNING',
+             '--format=JobID,ReqTRES'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
-        tres_map = {}
+        gpu_map = {}
         for line in result.stdout.decode('utf-8').splitlines():
-            # Split on the first | only; tres-req may contain commas
-            parts = line.split('|', 1)
+            parts = line.split('|')
             if len(parts) != 2:
                 continue
             job_id   = parts[0].strip()
             tres_str = parts[1].strip()
-            if job_id:
-                tres_map[job_id] = tres_str
-        logger.debug("TRES map built for %d running jobs.", len(tres_map))
-        return tres_map
-    except (subprocess.CalledProcessError, OSError) as e:
-        logger.warning("squeue --Format=tres-req failed (%s); GPU detection may be degraded.", e)
+            if not job_id or '.' in job_id:
+                continue  # skip job steps (e.g. 12345.batch)
+            count, model = parse_tres_gpu(tres_str)
+            if count > 0:
+                gpu_map[job_id] = (count, model)
+        logger.info("sacct GPU map: %d running jobs have GPU resources.", len(gpu_map))
+        return gpu_map
+    except subprocess.CalledProcessError as e:
+        logger.warning("sacct RUNNING query failed: %s — falling back to squeue %%b.", e.stderr.decode('utf-8'))
+        return {}
+    except OSError as e:
+        logger.warning("sacct not found or not executable: %s — falling back to squeue %%b.", e)
         return {}
 
 
@@ -299,18 +308,17 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
     time_limit_minutes.
 
     GPU detection priority:
-      1. ReqTRES via squeue --Format (authoritative — same source as scontrol)
-      2. %b GRES field (fallback for older Slurm or if --Format unavailable)
-      3. Node GPU map (fills in model when count is known but model is not)
+      1. sacct ReqTRES  — authoritative; works regardless of --gres submission style
+      2. squeue %b GRES — fallback for jobs not yet in sacct (e.g. just started)
+      3. Node GPU map   — fills in model name when count is known but model is not
     """
     squeue = get_cmd(slurm_bin_dir, 'squeue')
     node_gpu_map = node_gpu_map or {}
 
-    # Fetch TRES up front — this is the reliable GPU source.
-    # The %b field (GRES) is unreliable on some Slurm versions/configurations:
-    # jobs submitted with --gres=gpu:N (no model) may return N/A in %b even
-    # though ReqTRES correctly shows gres/gpu=N.
-    tres_by_job = _get_tres_by_job(squeue)
+    # Fetch GPU info from sacct up front — this is the reliable source.
+    # squeue %b (GRES) is unreliable: jobs submitted with --gres=gpu:N (no model)
+    # or --gpus=N may return N/A in %b even though ReqTRES shows gres/gpu=N.
+    gpu_by_job = _get_gpu_tres_by_job(slurm_bin_dir)
 
     try:
         result = subprocess.run(
@@ -336,32 +344,27 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
             mem_mb = parse_mem_mb(mem_str)
             time_limit_minutes = parse_time_limit_minutes(time_str)
 
-            # --- GPU detection -------------------------------------------------
-            # Priority 1: ReqTRES from --Format (most reliable)
-            if job_id in tres_by_job:
-                gpu_count, gpu_model = parse_tres_gpu(tres_by_job[job_id])
+            # --- GPU detection -----------------------------------------------
+            # Priority 1: sacct ReqTRES (authoritative)
+            if job_id in gpu_by_job:
+                gpu_count, gpu_model = gpu_by_job[job_id]
             else:
-                gpu_count, gpu_model = 0, ''
+                # Priority 2: squeue %b GRES (covers jobs not yet in sacct)
+                gpu_count, gpu_model = parse_gres(gres_str)
 
-            # Priority 2: %b GRES field (fallback when TRES unavailable)
-            if gpu_count == 0:
-                gres_count, gres_model = parse_gres(gres_str)
-                if gres_count > 0:
-                    gpu_count, gpu_model = gres_count, gres_model
-
-            # Priority 3: Node GPU map fills in model when count is known
+            # Priority 3: node map fills in model when count is known
             if gpu_count > 0 and not gpu_model and node_gpu_map:
                 first_node = parse_nodelist_first(nodelist_str.strip())
-                gpu_model = node_gpu_map.get(first_node, '')
-            # ------------------------------------------------------------------
+                gpu_model  = node_gpu_map.get(first_node, '')
+            # -----------------------------------------------------------------
 
             jobs.append({
-                "job_id":              job_id,
-                "cpus":                cpus,
-                "mem_mb":              mem_mb,
-                "gpu_count":           gpu_count,
-                "gpu_model":           gpu_model,
-                "time_limit_minutes":  time_limit_minutes,
+                "job_id":             job_id,
+                "cpus":               cpus,
+                "mem_mb":             mem_mb,
+                "gpu_count":          gpu_count,
+                "gpu_model":          gpu_model,
+                "time_limit_minutes": time_limit_minutes,
             })
         return jobs
 
