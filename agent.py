@@ -61,30 +61,53 @@ def parse_sacct_mem_mb(mem_str):
 
 def parse_gres(gres_str):
     """
-    Parses a Slurm GRES string into (gpu_count, gpu_model).
-    Examples:
-      'gpu:a30:2'        -> (2, 'a30')
-      'gpu:1'            -> (1, '')
-      'N/A'              -> (0, '')
-      'gpu:a30:2,cpu:4'  -> (2, 'a30')  [first gpu entry wins]
+    Parses a Slurm GRES/TRES string into (gpu_count, gpu_model).
+
+    Handles both formats returned by squeue %b depending on Slurm version:
+
+      Traditional GRES format:
+        'gpu:a30:2'         -> (2, 'a30')
+        'gpu:2'             -> (2, '')
+        'gpu:a30:2,cpu:4'   -> (2, 'a30')
+
+      TRES format (newer Slurm, or jobs submitted via --tres-per-node):
+        'gres/gpu=2'        -> (2, '')
+        'gres/gpu:a30=2'    -> (2, 'a30')
+        'gres/gpu:a30=1,cpu=4' -> (1, 'a30')
+
+      No GPU:
+        'N/A'  / ''  / None -> (0, '')
     """
     if not gres_str:
         return 0, ''
     for entry in gres_str.strip().lower().split(','):
         entry = entry.strip()
+        # ── TRES format: gres/gpu[:<model>]=<count> ──────────────────────────
+        if entry.startswith('gres/gpu'):
+            remainder = entry[len('gres/gpu'):]   # e.g. ''  or ':a30'  (before '=')
+            if '=' in remainder:
+                key_part, count_str = remainder.rsplit('=', 1)
+                try:
+                    count = int(count_str)
+                except ValueError:
+                    count = 1
+                model = key_part.lstrip(':')       # ':a30' -> 'a30', '' -> ''
+                return count, model
+            continue
+        # ── Traditional GRES format: gpu[:<model>]:<count> ───────────────────
         if not entry.startswith('gpu'):
             continue
         parts = entry.split(':')
-        if len(parts) == 3:
+        if len(parts) == 3:                        # gpu:model:count
             try:
                 return int(parts[2]), parts[1]
             except ValueError:
                 continue
-        elif len(parts) == 2:
+        elif len(parts) == 2:                      # gpu:count  or  gpu:model
             try:
-                return int(parts[1]), ''
+                return int(parts[1]), ''           # gpu:2  -> (2, '')
             except ValueError:
-                return 1, parts[1]
+                return 1, parts[1]                 # gpu:a30 -> (1, 'a30')
     return 0, ''
 
 
