@@ -236,16 +236,17 @@ def save_checkpoint(cluster_name, ts):
 # Slurm queries
 # ---------------------------------------------------------------------------
 
-def get_running_jobs(slurm_bin_dir=None):
+def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
     """
-    Queries Slurm for all RUNNING jobs including time limit.
+    Queries Slurm for all RUNNING jobs including time limit and assigned nodes.
     Returns a list of dicts with: job_id, cpus, mem_mb, gpu_count, gpu_model,
     time_limit_minutes.
     """
     squeue = get_cmd(slurm_bin_dir, 'squeue')
+    node_gpu_map = node_gpu_map or {}
     try:
         result = subprocess.run(
-            [squeue, '-h', '-t', 'RUNNING', '-o', '%i|%C|%m|%b|%l'],
+            [squeue, '-h', '-t', 'RUNNING', '-o', '%i|%C|%m|%b|%l|%N'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
         output = result.stdout.decode('utf-8').strip()
@@ -256,15 +257,19 @@ def get_running_jobs(slurm_bin_dir=None):
         jobs = []
         for line in output.splitlines():
             parts = line.strip().split('|')
-            if len(parts) != 5:
+            if len(parts) != 6:
                 continue
-            job_id, cpus_str, mem_str, gres_str, time_str = parts
+            job_id, cpus_str, mem_str, gres_str, time_str, nodelist_str = parts
             try:
                 cpus = int(cpus_str.strip())
             except ValueError:
                 cpus = 1
             mem_mb = parse_mem_mb(mem_str)
             gpu_count, gpu_model = parse_gres(gres_str)
+            # Resolve GPU model from node map when GRES lacks model type
+            if gpu_count > 0 and not gpu_model and node_gpu_map:
+                first_node = parse_nodelist_first(nodelist_str.strip())
+                gpu_model = node_gpu_map.get(first_node, "")
             time_limit_minutes = parse_time_limit_minutes(time_str)
             jobs.append({
                 "job_id": job_id.strip(),
