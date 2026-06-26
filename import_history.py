@@ -303,9 +303,8 @@ CREATE INDEX IF NOT EXISTS idx_user    ON jobs(username);
 CREATE INDEX IF NOT EXISTS idx_cluster ON jobs(cluster);
 """
 
-INSERT_SQL = """
-INSERT OR IGNORE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-"""
+INSERT_SQL_IGNORE  = "INSERT OR IGNORE  INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+INSERT_SQL_REPLACE = "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 
 
 def init_db(conn):
@@ -320,12 +319,15 @@ def init_db(conn):
 # Import logic
 # ---------------------------------------------------------------------------
 
-def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None):
+def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force_update=False):
     logger.info("Opening database: %s", db_path)
+    if force_update:
+        logger.info("--force-update: existing records will be REPLACED with recalculated costs.")
     if node_gpu_map:
         logger.info("Node GPU map loaded: %d nodes.", len(node_gpu_map))
     if default_gpu_model:
         logger.info("Default GPU model fallback: %s", default_gpu_model)
+    INSERT_SQL = INSERT_SQL_REPLACE if force_update else INSERT_SQL_IGNORE
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     conn = sqlite3.connect(db_path)
     init_db(conn)
@@ -453,6 +455,12 @@ def main():
              "(format: node_name|gpu_model, one per line). Used to resolve "
              "GPU model for jobs submitted without an explicit model in --gres."
     )
+    parser.add_argument(
+        "--force-update", action="store_true",
+        help="Replace existing DB records instead of skipping them (INSERT OR REPLACE). "
+             "Use this when re-importing after fixing GPU detection so that historical "
+             "costs are recalculated with correct GPU instance pricing."
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.csv_file):
@@ -474,7 +482,8 @@ def main():
 
     import_csv(args.csv_file, args.db,
                default_gpu_model=args.default_gpu_model,
-               node_gpu_map=node_gpu_map)
+               node_gpu_map=node_gpu_map,
+               force_update=args.force_update)
 
 
 if __name__ == "__main__":

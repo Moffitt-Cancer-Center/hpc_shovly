@@ -336,7 +336,7 @@ async def receive_agent_data(payload: AgentPayload):
             with _db_lock:
                 db = get_db()
                 db.executemany(
-                    "INSERT OR IGNORE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     rows
                 )
                 db.commit()
