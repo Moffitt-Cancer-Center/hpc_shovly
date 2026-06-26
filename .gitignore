@@ -1,0 +1,53 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+*.env.local
+
+# ── setup.sh generated files ──────────────────────────────────────────────────
+activate_env.sh
+run_agent.sh.bak
+
+# ── Application data directories ─────────────────────────────────────────────
+# Created by setup.sh and populated at runtime
+hpc-cost-comparator/
+# Bare data/ dir if used outside hpc-cost-comparator/
+data/
+
+# ── SQLite databases ──────────────────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+
+# ── Sacct / historical dump files ────────────────────────────────────────────
+*.csv
+node_gpu_map.csv
+
+# ── Agent checkpoint files ────────────────────────────────────────────────────
+.checkpoint_*
+
+# ── Log files ─────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── macOS metadata ────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
