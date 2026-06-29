@@ -290,7 +290,7 @@ def cmd_summary(args):
 
     if r["zero_cost"]:
         print()
-        print(YELLOW(f"  ⚠  {r['zero_cost']:,} jobs have \$0.00 cost — run 'anomalies' for details"))
+        print(YELLOW(f"  ⚠  {r['zero_cost']:,} jobs have $0.00 cost — run 'anomalies' for details"))
 
     # Cluster breakdown
     rows = conn.execute(f"""
