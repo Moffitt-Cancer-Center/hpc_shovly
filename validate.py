@@ -90,110 +90,14 @@ def print_table(headers, rows, color_col=None, warn_col=None):
             line = GREEN(line)
         print(line)
 
-# ── instance catalogs (kept in sync with app.py / import_history.py) ─────────
-GPU_MODEL_MAP = {
-    "h100": "H100", "h200": "H200",
-    "a100": "A100",
-    "a30":  "A10G", "a10g": "A10G", "a10": "A10G",
-    "v100": "V100",
-    "t4":   "T4",
-    "l40":  "L40S", "l40s": "L40S",
-}
+# ── instance catalogs (loaded from CSV price lists) ───────────────────────────
+import sys as _sys
+_sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "hpc-cost-comparator"))
+from load_pricelist import GPU_MODEL_MAP, load_catalogs as _load_catalogs
+del _sys
 
-AWS_INSTANCES = [
-    {"name": "p5.48xlarge",    "vcpus": 192, "mem_gb": 2048, "gpu_count": 8, "gpu_model": "H100",  "price": 98.32},
-    {"name": "p4d.24xlarge",   "vcpus": 96,  "mem_gb": 1152, "gpu_count": 8, "gpu_model": "A100",  "price": 32.77},
-    {"name": "p4de.24xlarge",  "vcpus": 96,  "mem_gb": 1152, "gpu_count": 8, "gpu_model": "A100",  "price": 40.96},
-    {"name": "p3.2xlarge",     "vcpus": 8,   "mem_gb": 61,   "gpu_count": 1, "gpu_model": "V100",  "price": 3.06},
-    {"name": "p3.8xlarge",     "vcpus": 32,  "mem_gb": 244,  "gpu_count": 4, "gpu_model": "V100",  "price": 12.24},
-    {"name": "p3.16xlarge",    "vcpus": 64,  "mem_gb": 488,  "gpu_count": 8, "gpu_model": "V100",  "price": 24.48},
-    {"name": "p3dn.24xlarge",  "vcpus": 96,  "mem_gb": 768,  "gpu_count": 8, "gpu_model": "V100",  "price": 31.21},
-    {"name": "g5.xlarge",      "vcpus": 4,   "mem_gb": 16,   "gpu_count": 1, "gpu_model": "A10G",  "price": 1.006},
-    {"name": "g5.2xlarge",     "vcpus": 8,   "mem_gb": 32,   "gpu_count": 1, "gpu_model": "A10G",  "price": 1.212},
-    {"name": "g5.4xlarge",     "vcpus": 16,  "mem_gb": 64,   "gpu_count": 1, "gpu_model": "A10G",  "price": 1.624},
-    {"name": "g5.8xlarge",     "vcpus": 32,  "mem_gb": 128,  "gpu_count": 1, "gpu_model": "A10G",  "price": 2.448},
-    {"name": "g5.12xlarge",    "vcpus": 48,  "mem_gb": 192,  "gpu_count": 4, "gpu_model": "A10G",  "price": 5.672},
-    {"name": "g5.16xlarge",    "vcpus": 64,  "mem_gb": 256,  "gpu_count": 1, "gpu_model": "A10G",  "price": 4.096},
-    {"name": "g5.24xlarge",    "vcpus": 96,  "mem_gb": 384,  "gpu_count": 4, "gpu_model": "A10G",  "price": 8.144},
-    {"name": "g5.48xlarge",    "vcpus": 192, "mem_gb": 768,  "gpu_count": 8, "gpu_model": "A10G",  "price": 16.288},
-    {"name": "g4dn.xlarge",    "vcpus": 4,   "mem_gb": 16,   "gpu_count": 1, "gpu_model": "T4",    "price": 0.526},
-    {"name": "g4dn.2xlarge",   "vcpus": 8,   "mem_gb": 32,   "gpu_count": 1, "gpu_model": "T4",    "price": 0.752},
-    {"name": "g4dn.4xlarge",   "vcpus": 16,  "mem_gb": 64,   "gpu_count": 1, "gpu_model": "T4",    "price": 1.204},
-    {"name": "g4dn.8xlarge",   "vcpus": 32,  "mem_gb": 128,  "gpu_count": 1, "gpu_model": "T4",    "price": 2.264},
-    {"name": "g4dn.12xlarge",  "vcpus": 48,  "mem_gb": 192,  "gpu_count": 4, "gpu_model": "T4",    "price": 3.912},
-    {"name": "g4dn.16xlarge",  "vcpus": 64,  "mem_gb": 256,  "gpu_count": 1, "gpu_model": "T4",    "price": 4.528},
-    {"name": "c6i.large",      "vcpus": 2,   "mem_gb": 4,    "gpu_count": 0, "gpu_model": "",      "price": 0.085},
-    {"name": "c6i.xlarge",     "vcpus": 4,   "mem_gb": 8,    "gpu_count": 0, "gpu_model": "",      "price": 0.170},
-    {"name": "c6i.2xlarge",    "vcpus": 8,   "mem_gb": 16,   "gpu_count": 0, "gpu_model": "",      "price": 0.340},
-    {"name": "c6i.4xlarge",    "vcpus": 16,  "mem_gb": 32,   "gpu_count": 0, "gpu_model": "",      "price": 0.680},
-    {"name": "c6i.8xlarge",    "vcpus": 32,  "mem_gb": 64,   "gpu_count": 0, "gpu_model": "",      "price": 1.360},
-    {"name": "c6i.12xlarge",   "vcpus": 48,  "mem_gb": 96,   "gpu_count": 0, "gpu_model": "",      "price": 2.040},
-    {"name": "c6i.16xlarge",   "vcpus": 64,  "mem_gb": 128,  "gpu_count": 0, "gpu_model": "",      "price": 2.720},
-    {"name": "c6i.24xlarge",   "vcpus": 96,  "mem_gb": 192,  "gpu_count": 0, "gpu_model": "",      "price": 4.080},
-    {"name": "c6i.32xlarge",   "vcpus": 128, "mem_gb": 256,  "gpu_count": 0, "gpu_model": "",      "price": 5.440},
-    {"name": "m6i.large",      "vcpus": 2,   "mem_gb": 8,    "gpu_count": 0, "gpu_model": "",      "price": 0.096},
-    {"name": "m6i.xlarge",     "vcpus": 4,   "mem_gb": 16,   "gpu_count": 0, "gpu_model": "",      "price": 0.192},
-    {"name": "m6i.2xlarge",    "vcpus": 8,   "mem_gb": 32,   "gpu_count": 0, "gpu_model": "",      "price": 0.384},
-    {"name": "m6i.4xlarge",    "vcpus": 16,  "mem_gb": 64,   "gpu_count": 0, "gpu_model": "",      "price": 0.768},
-    {"name": "m6i.8xlarge",    "vcpus": 32,  "mem_gb": 128,  "gpu_count": 0, "gpu_model": "",      "price": 1.536},
-    {"name": "m6i.12xlarge",   "vcpus": 48,  "mem_gb": 192,  "gpu_count": 0, "gpu_model": "",      "price": 2.304},
-    {"name": "m6i.16xlarge",   "vcpus": 64,  "mem_gb": 256,  "gpu_count": 0, "gpu_model": "",      "price": 3.072},
-    {"name": "m6i.24xlarge",   "vcpus": 96,  "mem_gb": 384,  "gpu_count": 0, "gpu_model": "",      "price": 4.608},
-    {"name": "m6i.32xlarge",   "vcpus": 128, "mem_gb": 512,  "gpu_count": 0, "gpu_model": "",      "price": 6.144},
-    {"name": "r7i.large",      "vcpus": 2,   "mem_gb": 16,   "gpu_count": 0, "gpu_model": "",      "price": 0.133},
-    {"name": "r7i.xlarge",     "vcpus": 4,   "mem_gb": 32,   "gpu_count": 0, "gpu_model": "",      "price": 0.266},
-    {"name": "r7i.2xlarge",    "vcpus": 8,   "mem_gb": 64,   "gpu_count": 0, "gpu_model": "",      "price": 0.532},
-    {"name": "r7i.4xlarge",    "vcpus": 16,  "mem_gb": 128,  "gpu_count": 0, "gpu_model": "",      "price": 1.064},
-    {"name": "r7i.8xlarge",    "vcpus": 32,  "mem_gb": 256,  "gpu_count": 0, "gpu_model": "",      "price": 2.128},
-    {"name": "r7i.12xlarge",   "vcpus": 48,  "mem_gb": 384,  "gpu_count": 0, "gpu_model": "",      "price": 3.192},
-    {"name": "r7i.16xlarge",   "vcpus": 64,  "mem_gb": 512,  "gpu_count": 0, "gpu_model": "",      "price": 4.256},
-    {"name": "r7i.24xlarge",   "vcpus": 96,  "mem_gb": 768,  "gpu_count": 0, "gpu_model": "",      "price": 6.384},
-    {"name": "r7i.48xlarge",   "vcpus": 192, "mem_gb": 1536, "gpu_count": 0, "gpu_model": "",      "price": 12.768},
-]
+AWS_INSTANCES, AZURE_INSTANCES = _load_catalogs()
 
-AZURE_INSTANCES = [
-    {"name": "Standard_ND96isr_H100_v5",  "vcpus": 96,  "mem_gb": 900,  "gpu_count": 8, "gpu_model": "H100",  "price": 98.32},
-    {"name": "Standard_NC24ads_A100_v4",  "vcpus": 24,  "mem_gb": 220,  "gpu_count": 1, "gpu_model": "A100",  "price": 3.67},
-    {"name": "Standard_NC48ads_A100_v4",  "vcpus": 48,  "mem_gb": 440,  "gpu_count": 2, "gpu_model": "A100",  "price": 7.35},
-    {"name": "Standard_NC96ads_A100_v4",  "vcpus": 96,  "mem_gb": 880,  "gpu_count": 4, "gpu_model": "A100",  "price": 14.69},
-    {"name": "Standard_ND96asr_v4",       "vcpus": 96,  "mem_gb": 900,  "gpu_count": 8, "gpu_model": "A100",  "price": 32.77},
-    {"name": "Standard_NC6s_v3",          "vcpus": 6,   "mem_gb": 112,  "gpu_count": 1, "gpu_model": "V100",  "price": 3.06},
-    {"name": "Standard_NC12s_v3",         "vcpus": 12,  "mem_gb": 224,  "gpu_count": 2, "gpu_model": "V100",  "price": 6.12},
-    {"name": "Standard_NC24s_v3",         "vcpus": 24,  "mem_gb": 448,  "gpu_count": 4, "gpu_model": "V100",  "price": 12.24},
-    {"name": "Standard_NV6ads_A10_v5",    "vcpus": 6,   "mem_gb": 55,   "gpu_count": 1, "gpu_model": "A10G",  "price": 0.908},
-    {"name": "Standard_NV12ads_A10_v5",   "vcpus": 12,  "mem_gb": 110,  "gpu_count": 1, "gpu_model": "A10G",  "price": 1.816},
-    {"name": "Standard_NV18ads_A10_v5",   "vcpus": 18,  "mem_gb": 220,  "gpu_count": 1, "gpu_model": "A10G",  "price": 2.724},
-    {"name": "Standard_NV36ads_A10_v5",   "vcpus": 36,  "mem_gb": 440,  "gpu_count": 2, "gpu_model": "A10G",  "price": 5.448},
-    {"name": "Standard_NV72ads_A10_v5",   "vcpus": 72,  "mem_gb": 880,  "gpu_count": 4, "gpu_model": "A10G",  "price": 10.896},
-    {"name": "Standard_NC4as_T4_v3",      "vcpus": 4,   "mem_gb": 28,   "gpu_count": 1, "gpu_model": "T4",    "price": 0.526},
-    {"name": "Standard_NC8as_T4_v3",      "vcpus": 8,   "mem_gb": 56,   "gpu_count": 1, "gpu_model": "T4",    "price": 0.752},
-    {"name": "Standard_NC16as_T4_v3",     "vcpus": 16,  "mem_gb": 110,  "gpu_count": 1, "gpu_model": "T4",    "price": 1.204},
-    {"name": "Standard_NC64as_T4_v3",     "vcpus": 64,  "mem_gb": 440,  "gpu_count": 4, "gpu_model": "T4",    "price": 4.352},
-    {"name": "Standard_F2s_v2",           "vcpus": 2,   "mem_gb": 4,    "gpu_count": 0, "gpu_model": "",      "price": 0.085},
-    {"name": "Standard_F4s_v2",           "vcpus": 4,   "mem_gb": 8,    "gpu_count": 0, "gpu_model": "",      "price": 0.170},
-    {"name": "Standard_F8s_v2",           "vcpus": 8,   "mem_gb": 16,   "gpu_count": 0, "gpu_model": "",      "price": 0.338},
-    {"name": "Standard_F16s_v2",          "vcpus": 16,  "mem_gb": 32,   "gpu_count": 0, "gpu_model": "",      "price": 0.676},
-    {"name": "Standard_F32s_v2",          "vcpus": 32,  "mem_gb": 64,   "gpu_count": 0, "gpu_model": "",      "price": 1.352},
-    {"name": "Standard_F48s_v2",          "vcpus": 48,  "mem_gb": 96,   "gpu_count": 0, "gpu_model": "",      "price": 2.028},
-    {"name": "Standard_F64s_v2",          "vcpus": 64,  "mem_gb": 128,  "gpu_count": 0, "gpu_model": "",      "price": 2.704},
-    {"name": "Standard_F72s_v2",          "vcpus": 72,  "mem_gb": 144,  "gpu_count": 0, "gpu_model": "",      "price": 3.045},
-    {"name": "Standard_D2s_v5",           "vcpus": 2,   "mem_gb": 8,    "gpu_count": 0, "gpu_model": "",      "price": 0.096},
-    {"name": "Standard_D4s_v5",           "vcpus": 4,   "mem_gb": 16,   "gpu_count": 0, "gpu_model": "",      "price": 0.192},
-    {"name": "Standard_D8s_v5",           "vcpus": 8,   "mem_gb": 32,   "gpu_count": 0, "gpu_model": "",      "price": 0.384},
-    {"name": "Standard_D16s_v5",          "vcpus": 16,  "mem_gb": 64,   "gpu_count": 0, "gpu_model": "",      "price": 0.768},
-    {"name": "Standard_D32s_v5",          "vcpus": 32,  "mem_gb": 128,  "gpu_count": 0, "gpu_model": "",      "price": 1.536},
-    {"name": "Standard_D48s_v5",          "vcpus": 48,  "mem_gb": 192,  "gpu_count": 0, "gpu_model": "",      "price": 2.304},
-    {"name": "Standard_D64s_v5",          "vcpus": 64,  "mem_gb": 256,  "gpu_count": 0, "gpu_model": "",      "price": 3.072},
-    {"name": "Standard_D96s_v5",          "vcpus": 96,  "mem_gb": 384,  "gpu_count": 0, "gpu_model": "",      "price": 4.608},
-    {"name": "Standard_E2s_v5",           "vcpus": 2,   "mem_gb": 16,   "gpu_count": 0, "gpu_model": "",      "price": 0.127},
-    {"name": "Standard_E4s_v5",           "vcpus": 4,   "mem_gb": 32,   "gpu_count": 0, "gpu_model": "",      "price": 0.254},
-    {"name": "Standard_E8s_v5",           "vcpus": 8,   "mem_gb": 64,   "gpu_count": 0, "gpu_model": "",      "price": 0.504},
-    {"name": "Standard_E16s_v5",          "vcpus": 16,  "mem_gb": 128,  "gpu_count": 0, "gpu_model": "",      "price": 1.008},
-    {"name": "Standard_E32s_v5",          "vcpus": 32,  "mem_gb": 256,  "gpu_count": 0, "gpu_model": "",      "price": 2.016},
-    {"name": "Standard_E48s_v5",          "vcpus": 48,  "mem_gb": 384,  "gpu_count": 0, "gpu_model": "",      "price": 3.024},
-    {"name": "Standard_E64s_v5",          "vcpus": 64,  "mem_gb": 512,  "gpu_count": 0, "gpu_model": "",      "price": 4.032},
-    {"name": "Standard_E96s_v5",          "vcpus": 96,  "mem_gb": 672,  "gpu_count": 0, "gpu_model": "",      "price": 6.048},
-]
 
 # ── instance matching (mirror of app.py find_best_instance) ──────────────────
 def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
@@ -967,7 +871,7 @@ def cmd_anomalies(args):
         issues += len(unknown_models)
         print(YELLOW(f"  ⚠  GPU models in DB not in GPU_MODEL_MAP (may use wrong cloud instance):"))
         for m in unknown_models:
-            print(f"       '{m}'  →  add to GPU_MODEL_MAP in app.py and import_history.py")
+            print(f"       '{m}'  →  add to GPU_MODEL_MAP in hpc-cost-comparator/load_pricelist.py")
 
     if issues == 0:
         print(GREEN("  ✓  No anomalies detected"))
