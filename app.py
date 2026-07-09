@@ -84,13 +84,17 @@ def get_db() -> sqlite3.Connection:
     global _db_conn
     if _db_conn is None:
         os.makedirs("data", exist_ok=True)
-        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     return _db_conn
 
 
 def init_db() -> None:
     """Creates the historical jobs table and indexes if they don't exist."""
     conn = get_db()
+    # WAL mode allows concurrent readers while the app is writing,
+    # so validate.py and other tools can query without getting a lock error.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL; faster than FULL
     conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             job_id         TEXT,

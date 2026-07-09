@@ -128,7 +128,7 @@ def open_db(path):
     if not os.path.exists(path):
         print(RED(f"  ERROR: database not found: {path}"))
         sys.exit(1)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)  # wait up to 30 s if app is writing
     conn.row_factory = sqlite3.Row
     return conn
 
