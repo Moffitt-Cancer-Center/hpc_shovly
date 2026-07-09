@@ -1,11 +1,14 @@
 FROM python:3.11-slim
 
+# Suppress debconf "unable to initialize frontend" warnings during apt-get
+ENV DEBIAN_FRONTEND=noninteractive
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install standard linux tools needed for slurm querying if applicable
-RUN apt-get update && apt-get install -y procps && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
