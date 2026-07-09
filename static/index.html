@@ -85,6 +85,8 @@
                     <div class="hist-kpi"><div class="label">AWS Total</div><div class="value" id="hist-aws-total">&mdash;</div></div>
                     <div class="hist-kpi"><div class="label">Azure Total</div><div class="value" id="hist-azure-total">&mdash;</div></div>
                     <div class="hist-kpi"><div class="label">Compute Hours</div><div class="value" id="hist-compute-hours">&mdash;</div></div>
+                    <div class="hist-kpi" id="hist-onprem-kpi" style="display:none"><div class="label">On-Prem Total</div><div class="value" id="hist-onprem-total">&mdash;</div></div>
+                    <div class="hist-kpi" id="hist-onprem-hr-kpi" style="display:none"><div class="label" id="hist-onprem-hr-label">On-Prem $/hr</div><div class="value" id="hist-onprem-hr">&mdash;</div></div>
                 </div>
                 <div class="chart-container full-width">
                     <canvas id="historical-chart"></canvas>
@@ -109,6 +111,26 @@
                         </thead>
                         <tbody id="users-table-body"></tbody>
                     </table>
+                </div>
+            </section>
+
+            <!-- On-Premises Cost Calculator -->
+            <section class="onprem-section">
+                <div class="onprem-section-header" id="onprem-toggle-header">
+                    <div class="onprem-title-group">
+                        <h2>On-Premises Cost Calculator</h2>
+                        <span class="optional-badge">Optional</span>
+                    </div>
+                    <button class="toggle-btn" id="onprem-toggle-btn" aria-expanded="false">Show &#9660;</button>
+                </div>
+                <div class="onprem-body" id="onprem-body" style="display:none">
+                    <p class="section-desc">Configure per-cluster capital and operating expenditures. On-prem costs will appear alongside AWS and Azure in the Historical Cost Calculator above once configured. All values are persisted to the server.</p>
+                    <div class="onprem-grid" id="onprem-grid">
+                        <!-- Cluster cost cards rendered by JavaScript -->
+                    </div>
+                    <div class="onprem-footer">
+                        <button class="action-btn secondary-btn" id="onprem-add-btn">&#43; Add Cluster</button>
+                    </div>
                 </div>
             </section>
         </main>

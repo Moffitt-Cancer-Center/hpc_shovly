@@ -279,3 +279,235 @@ footer {
 .top-users-section .table-container {
     max-height: 500px;
 }
+
+/* ------------------------------------------------------------------ */
+/* On-Premises Cost Calculator                                         */
+/* ------------------------------------------------------------------ */
+
+.onprem-section {
+    background-color: #1f4068;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    margin-top: 30px;
+}
+
+.onprem-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.onprem-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.onprem-title-group h2 {
+    margin: 0;
+    color: #e0e0e0;
+}
+
+.optional-badge {
+    background-color: #2a528a;
+    color: #a0c4ff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.toggle-btn {
+    background: none;
+    border: 1px solid #4db6ac;
+    color: #4db6ac;
+    border-radius: 4px;
+    padding: 5px 16px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+
+.toggle-btn:hover {
+    background-color: #4db6ac;
+    color: #1a1a2e;
+}
+
+.onprem-body {
+    margin-top: 18px;
+}
+
+.section-desc {
+    color: #a0a0a0;
+    font-size: 0.88rem;
+    margin: 0 0 20px;
+    text-align: center;
+}
+
+.onprem-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.onprem-card {
+    background-color: #162447;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid transparent;
+    transition: border-color 0.2s;
+}
+
+.onprem-card:hover {
+    border-color: #2a528a;
+}
+
+.onprem-card-unsaved {
+    border-color: rgba(77, 182, 172, 0.25);
+}
+
+.onprem-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    gap: 8px;
+}
+
+.onprem-cluster-label {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #4db6ac;
+    word-break: break-all;
+}
+
+.onprem-cluster-name-input {
+    font-size: 1rem;
+    font-weight: 700;
+    flex: 1;
+}
+
+.onprem-saved-badge {
+    font-size: 0.72rem;
+    color: #4db6ac;
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+.onprem-inputs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.onprem-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.onprem-field label {
+    font-size: 0.75rem;
+    color: #a0a0a0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.onprem-input {
+    background-color: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #2a528a;
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 0.9rem;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.onprem-input:focus {
+    border-color: #4db6ac;
+    box-shadow: 0 0 4px rgba(77, 182, 172, 0.35);
+}
+
+.onprem-calc-strip {
+    display: flex;
+    gap: 12px;
+    background-color: #0f2035;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    justify-content: space-around;
+}
+
+.onprem-calc-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.calc-lbl {
+    font-size: 0.73rem;
+    color: #a0a0a0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.calc-val {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #80cbc4;
+}
+
+.onprem-funding-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.onprem-field-wide {
+    /* inherits .onprem-field */
+}
+
+.onprem-card-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.onprem-footer {
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+/* Modifier button styles — must have higher specificity than .action-btn */
+button.action-btn.secondary-btn {
+    background-color: transparent;
+    color: #4db6ac;
+    border: 1px solid #4db6ac;
+}
+
+button.action-btn.secondary-btn:hover {
+    background-color: #4db6ac;
+    color: #1a1a2e;
+}
+
+button.action-btn.danger-btn {
+    background-color: transparent;
+    color: #ef9a9a;
+    border: 1px solid #ef9a9a;
+}
+
+button.action-btn.danger-btn:hover {
+    background-color: #ef9a9a;
+    color: #1a1a2e;
+}

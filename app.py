@@ -48,6 +48,15 @@ class AgentPayload(BaseModel):
     completed_jobs: List[CompletedJob] = []
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+class ClusterCost(BaseModel):
+    cluster: str = ""
+    capex_total: float = 0.0
+    lifecycle_years: int = Field(default=3, ge=1, le=50)
+    opex_amount: float = 0.0
+    opex_period: str = "annual"   # "annual" or "monthly"
+    funding_source: str = ""
+    funding_note: str = ""
+
 # ---------------------------------------------------------------------------
 # Global state
 # ---------------------------------------------------------------------------
@@ -106,6 +115,18 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_start   ON jobs(start_time)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user    ON jobs(username)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster ON jobs(cluster)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cluster_costs (
+            cluster          TEXT PRIMARY KEY,
+            capex_total      REAL    DEFAULT 0.0,
+            lifecycle_years  INTEGER DEFAULT 3,
+            opex_amount      REAL    DEFAULT 0.0,
+            opex_period      TEXT    DEFAULT 'annual',
+            funding_source   TEXT    DEFAULT '',
+            funding_note     TEXT    DEFAULT '',
+            updated_at       TEXT    DEFAULT ''
+        )
+    """)
     conn.commit()
     logger.info("Historical database ready at %s", DB_PATH)
 
@@ -123,6 +144,14 @@ AWS_INSTANCES, AZURE_INSTANCES = _load_catalogs()
 # ---------------------------------------------------------------------------
 # Instance matching
 # ---------------------------------------------------------------------------
+
+def _annual_onprem_cost(capex_total: float, lifecycle_years: int,
+                        opex_amount: float, opex_period: str) -> float:
+    """Annualised on-premises total cost for a cluster (CapEx amortised + OpEx)."""
+    annual_capex = capex_total / max(lifecycle_years, 1)
+    annual_opex  = opex_amount * 12 if opex_period == "monthly" else opex_amount
+    return annual_capex + annual_opex
+
 
 def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
     """
@@ -315,7 +344,7 @@ async def get_historical(
     end:     Optional[str] = Query(None, description="End date YYYY-MM-DD (inclusive)"),
     cluster: str           = Query("all", description="Cluster name or 'all'")
 ):
-    """Return daily cost totals for the given date range and cluster."""
+    """Return daily cost totals for the given date range and cluster, including on-prem if configured."""
     try:
         conditions, params = [], []
         if start:
@@ -338,20 +367,76 @@ async def get_historical(
             ).fetchone()
             daily_rows = db.execute(
                 f"""SELECT date(start_time, 'unixepoch') AS day,
-                           SUM(aws_total), SUM(azure_total), COUNT(*)
+                           SUM(aws_total), SUM(azure_total), COUNT(*), SUM(elapsed_min)
                     FROM jobs {where}
                     GROUP BY day ORDER BY day""",
                 params
             ).fetchall()
+            # Fetch on-prem cost configurations relevant to this query
+            if cluster != "all":
+                cc_single   = db.execute(
+                    "SELECT capex_total, lifecycle_years, opex_amount, opex_period "
+                    "FROM cluster_costs WHERE cluster = ?",
+                    [cluster]
+                ).fetchone()
+                cc_multiple = None
+            else:
+                cc_single   = None
+                cc_multiple = db.execute(
+                    "SELECT capex_total, lifecycle_years, opex_amount, opex_period FROM cluster_costs"
+                ).fetchall()
+
+        # Compute on-prem costs
+        onprem_total             = None
+        onprem_cost_per_hour     = None   # theoretical: annual / 8760 (single cluster only)
+        onprem_eff_cost_per_hour = None   # effective:   prorated_total / actual_compute_hours
+        onprem_daily_cost        = None   # constant daily prorated value for chart
+        try:
+            if start and end:
+                s_dt          = datetime.strptime(start, "%Y-%m-%d")
+                e_dt          = datetime.strptime(end,   "%Y-%m-%d") + timedelta(days=1)
+                days_in_range = (e_dt - s_dt).days
+            else:
+                days_in_range = None
+
+            if cluster != "all" and cc_single:
+                annual = _annual_onprem_cost(*cc_single)
+                if annual > 0:
+                    onprem_cost_per_hour = round(annual / 8760.0, 6)
+                    onprem_daily_cost    = round(annual / 365.0, 2)
+                    if days_in_range:
+                        onprem_total = round(annual * days_in_range / 365.0, 2)
+            elif cluster == "all" and cc_multiple:
+                total_annual = sum(_annual_onprem_cost(*r) for r in cc_multiple)
+                if total_annual > 0:
+                    onprem_daily_cost = round(total_annual / 365.0, 2)
+                    if days_in_range:
+                        onprem_total = round(total_annual * days_in_range / 365.0, 2)
+
+            if onprem_total is not None:
+                total_hours = (row[3] or 0) / 60.0
+                if total_hours > 0:
+                    onprem_eff_cost_per_hour = round(onprem_total / total_hours, 6)
+        except Exception as exc:
+            logger.warning("On-prem cost calculation skipped: %s", exc)
 
         return JSONResponse(content={
-            "total_jobs":          row[0] or 0,
-            "total_aws":           round(row[1] or 0.0, 2),
-            "total_azure":         round(row[2] or 0.0, 2),
-            "total_compute_hours": round((row[3] or 0) / 60.0, 1),
+            "total_jobs":              row[0] or 0,
+            "total_aws":               round(row[1] or 0.0, 2),
+            "total_azure":             round(row[2] or 0.0, 2),
+            "total_compute_hours":     round((row[3] or 0) / 60.0, 1),
+            "onprem_total":            onprem_total,
+            "onprem_cost_per_hour":    onprem_cost_per_hour,
+            "onprem_eff_cost_per_hour": onprem_eff_cost_per_hour,
             "daily": [
-                {"date": r[0], "aws_total": round(r[1] or 0, 2),
-                 "azure_total": round(r[2] or 0, 2), "jobs": r[3]}
+                {
+                    "date":          r[0],
+                    "aws_total":     round(r[1] or 0, 2),
+                    "azure_total":   round(r[2] or 0, 2),
+                    "jobs":          r[3],
+                    "compute_hours": round((r[4] or 0) / 60.0, 1),
+                    "onprem_total":  onprem_daily_cost,
+                }
                 for r in daily_rows
             ],
         })
@@ -425,6 +510,85 @@ async def get_clusters():
     except Exception as exc:
         logger.error("Clusters query failed: %s", exc)
         return JSONResponse(content={"clusters": list(APP_STATE["clusters"].keys())})
+
+
+# ---- On-prem cluster costs CRUD ------------------------------------------
+
+@app.get("/api/cluster-costs")
+async def get_cluster_costs():
+    """Return all saved on-prem CapEx/OpEx configurations."""
+    try:
+        with _db_lock:
+            rows = get_db().execute(
+                "SELECT cluster, capex_total, lifecycle_years, opex_amount, opex_period, "
+                "funding_source, funding_note, updated_at FROM cluster_costs ORDER BY cluster"
+            ).fetchall()
+        return JSONResponse(content={"clusters": [
+            {
+                "cluster":         r[0],
+                "capex_total":     r[1],
+                "lifecycle_years": r[2],
+                "opex_amount":     r[3],
+                "opex_period":     r[4],
+                "funding_source":  r[5],
+                "funding_note":    r[6],
+                "updated_at":      r[7],
+            } for r in rows
+        ]})
+    except Exception as exc:
+        logger.error("cluster-costs GET failed: %s", exc)
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+
+@app.put("/api/cluster-costs/{cluster_name}")
+async def upsert_cluster_cost(cluster_name: str, payload: ClusterCost):
+    """Insert or update CapEx/OpEx figures for a named cluster."""
+    if payload.opex_period not in ("annual", "monthly"):
+        return JSONResponse(
+            content={"error": "opex_period must be 'annual' or 'monthly'"},
+            status_code=422
+        )
+    now = datetime.utcnow().isoformat()
+    try:
+        with _db_lock:
+            db = get_db()
+            db.execute(
+                """INSERT INTO cluster_costs
+                       (cluster, capex_total, lifecycle_years, opex_amount, opex_period,
+                        funding_source, funding_note, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(cluster) DO UPDATE SET
+                       capex_total      = excluded.capex_total,
+                       lifecycle_years  = excluded.lifecycle_years,
+                       opex_amount      = excluded.opex_amount,
+                       opex_period      = excluded.opex_period,
+                       funding_source   = excluded.funding_source,
+                       funding_note     = excluded.funding_note,
+                       updated_at       = excluded.updated_at""",
+                (cluster_name, payload.capex_total, payload.lifecycle_years,
+                 payload.opex_amount, payload.opex_period,
+                 payload.funding_source, payload.funding_note, now)
+            )
+            db.commit()
+        logger.info("Upserted on-prem cost config for '%s'.", cluster_name)
+        return JSONResponse(content={"status": "ok", "updated_at": now})
+    except Exception as exc:
+        logger.error("cluster-costs PUT failed for '%s': %s", cluster_name, exc)
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+
+@app.delete("/api/cluster-costs/{cluster_name}")
+async def delete_cluster_cost(cluster_name: str):
+    """Remove on-prem CapEx/OpEx configuration for a cluster."""
+    try:
+        with _db_lock:
+            get_db().execute("DELETE FROM cluster_costs WHERE cluster = ?", (cluster_name,))
+            get_db().commit()
+        logger.info("Deleted on-prem cost config for '%s'.", cluster_name)
+        return JSONResponse(content={"status": "ok"})
+    except Exception as exc:
+        logger.error("cluster-costs DELETE failed for '%s': %s", cluster_name, exc)
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
 
 
 # Serve frontend (must be last so API routes take priority)

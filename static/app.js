@@ -316,10 +316,53 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('hist-azure-total').textContent    = formatCurrency(data.total_azure);
             document.getElementById('hist-compute-hours').textContent  = data.total_compute_hours.toLocaleString();
 
+            // On-prem KPIs — shown only when cluster costs are configured
+            const onpremKpi   = document.getElementById('hist-onprem-kpi');
+            const onpremHrKpi = document.getElementById('hist-onprem-hr-kpi');
+            if (data.onprem_total != null) {
+                document.getElementById('hist-onprem-total').textContent = formatCurrency(data.onprem_total);
+                onpremKpi.style.display = '';
+            } else {
+                onpremKpi.style.display = 'none';
+            }
+            if (data.onprem_eff_cost_per_hour != null) {
+                document.getElementById('hist-onprem-hr-label').textContent = 'On-Prem Eff. $/hr';
+                document.getElementById('hist-onprem-hr').textContent = `$${data.onprem_eff_cost_per_hour.toFixed(4)}`;
+                onpremHrKpi.style.display = '';
+            } else if (data.onprem_cost_per_hour != null) {
+                document.getElementById('hist-onprem-hr-label').textContent = 'On-Prem $/hr';
+                document.getElementById('hist-onprem-hr').textContent = `$${data.onprem_cost_per_hour.toFixed(4)}`;
+                onpremHrKpi.style.display = '';
+            } else {
+                onpremHrKpi.style.display = 'none';
+            }
+
             if (!historicalChart) initHistoricalChart();
-            historicalChart.data.labels                   = data.daily.map(d => d.date);
-            historicalChart.data.datasets[0].data         = data.daily.map(d => d.aws_total);
-            historicalChart.data.datasets[1].data         = data.daily.map(d => d.azure_total);
+            historicalChart.data.labels               = data.daily.map(d => d.date);
+            historicalChart.data.datasets[0].data     = data.daily.map(d => d.aws_total);
+            historicalChart.data.datasets[1].data     = data.daily.map(d => d.azure_total);
+
+            // On-prem daily line (3rd dataset — added or removed dynamically)
+            const onpremVals = data.daily.map(d => d.onprem_total ?? null);
+            const hasOnprem  = onpremVals.some(v => v !== null);
+            if (hasOnprem) {
+                if (historicalChart.data.datasets.length < 3) {
+                    historicalChart.data.datasets.push({
+                        label:           'On-Prem Daily Cost ($)',
+                        data:            onpremVals,
+                        borderColor:     'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.12)',
+                        tension:         0.3,
+                        fill:            true,
+                        pointRadius:     3,
+                        borderDash:      [6, 3],
+                    });
+                } else {
+                    historicalChart.data.datasets[2].data = onpremVals;
+                }
+            } else if (historicalChart.data.datasets.length >= 3) {
+                historicalChart.data.datasets.splice(2);
+            }
             historicalChart.update();
         } catch (e) {
             console.error('Historical fetch failed:', e);
@@ -402,4 +445,232 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }).catch(() => {});
+
+    // ----------------------------------------------------------------
+    // On-Premises Cost Calculator
+    // ----------------------------------------------------------------
+
+    const FUNDING_SOURCES = [
+        { value: '',              label: '\u2014 Select Funding Source \u2014' },
+        { value: 'Federal Grant', label: 'Federal Grant' },
+        { value: 'Philanthropy',  label: 'Philanthropy' },
+        { value: 'Capital Fund',  label: 'Capital Fund' },
+        { value: 'Departmental',  label: 'Departmental' },
+        { value: 'Other',         label: 'Other' },
+    ];
+
+    let _onpremCosts   = {};        // { clusterName: savedRecord }
+    let _knownClusters = new Set(); // from /api/clusters
+
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    // Toggle show / hide
+    document.getElementById('onprem-toggle-btn').addEventListener('click', () => {
+        const body    = document.getElementById('onprem-body');
+        const btn     = document.getElementById('onprem-toggle-btn');
+        const opening = body.style.display === 'none';
+        body.style.display = opening ? 'block' : 'none';
+        btn.innerHTML      = opening ? 'Hide &#9650;' : 'Show &#9660;';
+        btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        if (opening) loadOnpremCosts();
+    });
+
+    async function loadOnpremCosts() {
+        try {
+            const [costsRes, clustersRes] = await Promise.all([
+                fetch('/api/cluster-costs'),
+                fetch('/api/clusters'),
+            ]);
+            const costsData    = costsRes.ok    ? await costsRes.json()    : { clusters: [] };
+            const clustersData = clustersRes.ok ? await clustersRes.json() : { clusters: [] };
+            _knownClusters = new Set(clustersData.clusters || []);
+            _onpremCosts   = {};
+            (costsData.clusters || []).forEach(c => { _onpremCosts[c.cluster] = c; });
+        } catch (e) {
+            console.error('Failed to load on-prem data:', e);
+        }
+        renderOnpremGrid();
+    }
+
+    function _calcAnnual(capex, lifecycle, opex, period) {
+        const ac = parseFloat(capex)    / Math.max(parseInt(lifecycle) || 1, 1);
+        const ao = period === 'monthly' ? parseFloat(opex) * 12 : parseFloat(opex);
+        return (isNaN(ac) ? 0 : ac) + (isNaN(ao) ? 0 : ao);
+    }
+
+    function renderOnpremGrid() {
+        const grid = document.getElementById('onprem-grid');
+        grid.innerHTML = '';
+        const merged = new Set([..._knownClusters, ...Object.keys(_onpremCosts)]);
+        const names  = [...merged].sort();
+        if (names.length === 0) {
+            grid.innerHTML = '<p class="status-msg">No clusters found. Click &ldquo;+ Add Cluster&rdquo; to add one manually.</p>';
+            return;
+        }
+        names.forEach(name => grid.appendChild(buildOnpremCard(name, _onpremCosts[name] || null, false)));
+    }
+
+    function buildOnpremCard(clusterName, data, isNew) {
+        const capex    = parseFloat(data?.capex_total     ?? 0);
+        const lifecycle= parseInt(data?.lifecycle_years   ?? 3);
+        const opex     = parseFloat(data?.opex_amount     ?? 0);
+        const period   = data?.opex_period    || 'annual';
+        const funding  = data?.funding_source || '';
+        const note     = data?.funding_note   || '';
+        const updatedAt= data?.updated_at     || '';
+        const isSaved  = !!data;
+        const annual   = _calcAnnual(capex, lifecycle, opex, period);
+        const cph      = annual / 8760;
+
+        const fundingOpts = FUNDING_SOURCES.map(f =>
+            `<option value="${escapeHtml(f.value)}" ${f.value === funding ? 'selected' : ''}>${escapeHtml(f.label)}</option>`
+        ).join('');
+
+        const card = document.createElement('div');
+        card.className = 'onprem-card' + (isSaved ? '' : ' onprem-card-unsaved');
+        card.dataset.originalCluster = isNew ? '' : clusterName;
+
+        card.innerHTML = `
+            <div class="onprem-card-header">
+                ${isNew
+                    ? `<input type="text" class="onprem-input onprem-cluster-name-input" placeholder="Cluster name" value="" aria-label="Cluster name">`
+                    : `<span class="onprem-cluster-label">${escapeHtml(clusterName)}</span>`
+                }
+                ${isSaved ? `<span class="onprem-saved-badge" title="Last saved: ${escapeHtml(updatedAt)}">&#10003; Saved</span>` : ''}
+            </div>
+            <div class="onprem-inputs-grid">
+                <div class="onprem-field">
+                    <label>CapEx ($)</label>
+                    <input type="number" class="onprem-input" data-field="capex" min="0" step="10000" value="${capex}">
+                </div>
+                <div class="onprem-field">
+                    <label>Lifecycle (yrs)</label>
+                    <input type="number" class="onprem-input" data-field="lifecycle" min="1" max="50" step="1" value="${lifecycle}">
+                </div>
+                <div class="onprem-field">
+                    <label>OpEx ($)</label>
+                    <input type="number" class="onprem-input" data-field="opex" min="0" step="1000" value="${opex}">
+                </div>
+                <div class="onprem-field">
+                    <label>OpEx Period</label>
+                    <select class="onprem-input" data-field="period">
+                        <option value="annual"  ${period === 'annual'  ? 'selected' : ''}>Annual</option>
+                        <option value="monthly" ${period === 'monthly' ? 'selected' : ''}>Monthly</option>
+                    </select>
+                </div>
+            </div>
+            <div class="onprem-calc-strip">
+                <div class="onprem-calc-item">
+                    <span class="calc-lbl">Annual Total</span>
+                    <span class="calc-val" data-calc="annual">${formatCurrency(annual)}</span>
+                </div>
+                <div class="onprem-calc-item">
+                    <span class="calc-lbl">Cost / hr</span>
+                    <span class="calc-val" data-calc="cph">$${cph.toFixed(4)}</span>
+                </div>
+            </div>
+            <div class="onprem-funding-row">
+                <div class="onprem-field onprem-field-wide">
+                    <label>Funding Source</label>
+                    <select class="onprem-input" data-field="funding">${fundingOpts}</select>
+                </div>
+                <div class="onprem-field onprem-field-wide">
+                    <label>Note</label>
+                    <input type="text" class="onprem-input" data-field="note" placeholder="Optional note" value="${escapeHtml(note)}">
+                </div>
+            </div>
+            <div class="onprem-card-actions">
+                <button class="action-btn onprem-save-btn">Save</button>
+                <button class="action-btn danger-btn onprem-clear-btn">Clear</button>
+            </div>
+        `;
+
+        // Live recalculation on input
+        card.querySelectorAll('[data-field="capex"],[data-field="lifecycle"],[data-field="opex"],[data-field="period"]')
+            .forEach(el => el.addEventListener('input', () => {
+                const c = parseFloat(card.querySelector('[data-field="capex"]').value)    || 0;
+                const l = parseInt(card.querySelector('[data-field="lifecycle"]').value)  || 1;
+                const o = parseFloat(card.querySelector('[data-field="opex"]').value)     || 0;
+                const p = card.querySelector('[data-field="period"]').value;
+                const a = _calcAnnual(c, l, o, p);
+                card.querySelector('[data-calc="annual"]').textContent = formatCurrency(a);
+                card.querySelector('[data-calc="cph"]').textContent    = `$${(a / 8760).toFixed(4)}`;
+            }));
+
+        card.querySelector('.onprem-save-btn').addEventListener('click',  () => saveOnpremCard(card, clusterName, isNew));
+        card.querySelector('.onprem-clear-btn').addEventListener('click', () => clearOnpremCard(card, clusterName, isNew));
+
+        return card;
+    }
+
+    async function saveOnpremCard(card, originalName, isNew) {
+        const nameInput = card.querySelector('.onprem-cluster-name-input');
+        const name = isNew ? (nameInput?.value.trim() || '') : originalName;
+        if (!name) { alert('Please enter a cluster name.'); return; }
+
+        const payload = {
+            cluster:         name,
+            capex_total:     parseFloat(card.querySelector('[data-field="capex"]').value)    || 0,
+            lifecycle_years: parseInt(card.querySelector('[data-field="lifecycle"]').value)  || 3,
+            opex_amount:     parseFloat(card.querySelector('[data-field="opex"]').value)     || 0,
+            opex_period:     card.querySelector('[data-field="period"]').value,
+            funding_source:  card.querySelector('[data-field="funding"]').value,
+            funding_note:    card.querySelector('[data-field="note"]').value,
+        };
+
+        const saveBtn = card.querySelector('.onprem-save-btn');
+        saveBtn.disabled    = true;
+        saveBtn.textContent = 'Saving\u2026';
+
+        try {
+            const res = await fetch(`/api/cluster-costs/${encodeURIComponent(name)}`, {
+                method:  'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const respData = await res.json();
+            _onpremCosts[name] = { ...payload, updated_at: respData.updated_at || '' };
+            renderOnpremGrid();
+        } catch (e) {
+            console.error('Failed to save cluster cost:', e);
+            alert(`Failed to save: ${e.message}`);
+            saveBtn.disabled    = false;
+            saveBtn.textContent = 'Save';
+        }
+    }
+
+    async function clearOnpremCard(card, clusterName, isNew) {
+        if (isNew) { card.remove(); return; }
+        if (!_onpremCosts[clusterName]) { renderOnpremGrid(); return; }
+        if (!confirm(`Clear all on-prem cost data for "${clusterName}"?\nThis cannot be undone.`)) return;
+        try {
+            const res = await fetch(`/api/cluster-costs/${encodeURIComponent(clusterName)}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            delete _onpremCosts[clusterName];
+            renderOnpremGrid();
+        } catch (e) {
+            console.error('Failed to clear cluster cost:', e);
+            alert(`Failed to clear: ${e.message}`);
+        }
+    }
+
+    // "+ Add Cluster" button
+    document.getElementById('onprem-add-btn').addEventListener('click', () => {
+        const grid    = document.getElementById('onprem-grid');
+        const existing = grid.querySelector('.onprem-card-new');
+        if (existing) { existing.remove(); }
+        const newCard = buildOnpremCard('', null, true);
+        newCard.classList.add('onprem-card-new');
+        grid.prepend(newCard);
+        newCard.querySelector('.onprem-cluster-name-input')?.focus();
+    });
+
 });
