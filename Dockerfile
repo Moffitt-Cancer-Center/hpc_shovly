@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y procps && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
+# Ensure load_pricelist (inside hpc-cost-comparator/) is importable
+ENV PYTHONPATH=/app/hpc-cost-comparator
+
 # Expose the port Uvicorn runs on
 EXPOSE 8000
 

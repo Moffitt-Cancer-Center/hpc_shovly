@@ -134,9 +134,20 @@ def init_db() -> None:
 # Instance catalogs — loaded from CSV price lists at startup
 # ---------------------------------------------------------------------------
 import sys as _sys
-_sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "hpc-cost-comparator"))
-from load_pricelist import GPU_MODEL_MAP, load_catalogs as _load_catalogs
-del _sys
+import os as _os
+_hpc_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "hpc-cost-comparator")
+if not _os.path.isdir(_hpc_dir):          # fallback: try cwd
+    _hpc_dir = _os.path.join(_os.getcwd(), "hpc-cost-comparator")
+if _hpc_dir not in _sys.path:
+    _sys.path.insert(0, _hpc_dir)
+try:
+    from load_pricelist import GPU_MODEL_MAP, load_catalogs as _load_catalogs
+except ModuleNotFoundError as _e:
+    raise ModuleNotFoundError(
+        f"Cannot import load_pricelist. Looked in: {_hpc_dir}. "
+        "Ensure hpc-cost-comparator/ exists alongside app.py or set PYTHONPATH."
+    ) from _e
+del _sys, _os, _hpc_dir
 
 AWS_INSTANCES, AZURE_INSTANCES = _load_catalogs()
 
