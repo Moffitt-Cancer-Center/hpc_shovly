@@ -19,10 +19,9 @@ activate_env.sh
 run_agent.sh.bak
 
 # ── Application data directories ─────────────────────────────────────────────
-# Created by setup.sh and populated at runtime
-hpc-cost-comparator/
-# Bare data/ dir if used outside hpc-cost-comparator/
-data/
+# /data/ at the repo root holds runtime SQLite DBs — ignore it
+/data/
+# hpc-cost-comparator/ holds the price-list module and reference CSVs — track it
 
 # ── SQLite databases ──────────────────────────────────────────────────────────
 *.db
@@ -30,7 +29,6 @@ data/
 *.db-wal
 
 # ── Sacct / historical dump files ────────────────────────────────────────────
-*.csv
 node_gpu_map.csv
 
 # ── Agent checkpoint files ────────────────────────────────────────────────────
@@ -39,6 +37,7 @@ node_gpu_map.csv
 # ── Log files ─────────────────────────────────────────────────────────────────
 *.log
 logs/
+hpc-cost-comparator/logs/
 
 # ── macOS metadata ────────────────────────────────────────────────────────────
 .DS_Store
@@ -50,7 +49,3 @@ logs/
 *.swp
 *.swo
 *~
-<<<<<<< HEAD
-
-=======
->>>>>>> ecf57ec24bb291e5ecc50099f0f41d2d6912e388
