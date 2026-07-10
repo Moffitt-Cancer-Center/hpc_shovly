@@ -36,8 +36,9 @@ node_gpu_map.csv
 
 # ── Log files ─────────────────────────────────────────────────────────────────
 *.log
-logs/
-hpc-cost-comparator/logs/
+/logs/
+hpc-cost-comparator/logs/*
+!hpc-cost-comparator/logs/.gitkeep
 
 # ── macOS metadata ────────────────────────────────────────────────────────────
 .DS_Store
