@@ -415,4 +415,4 @@ When updating instance matching logic (`find_best_instance`) or the price-list l
 
 ---
 
-*Developed and maintained by the Research Computing team at [Moffitt Cancer Center](https://moffitt.org).*
+*Developed and maintained by the Scientific Computing team at [Moffitt Cancer Center](https://moffitt.org).*
