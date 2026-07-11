@@ -549,10 +549,30 @@ def main():
     try:
         response = requests.post(args.dashboard_url, json=payload, timeout=15,
                                  verify=ssl_verify)
+        logger.debug("HTTP %s from %s", response.status_code, args.dashboard_url)
         response.raise_for_status()
-        logger.info("Success: %s", response.json())
+        # Log raw text first so a non-JSON body is always visible
+        body = response.text
+        try:
+            logger.info("Success: %s", response.json())
+        except ValueError:
+            logger.warning(
+                "Server returned HTTP %s but body is not JSON (first 500 chars): %r",
+                response.status_code, body[:500]
+            )
+            return
         # Only advance the checkpoint after a successful submission
         save_checkpoint(args.cluster_name, now_ts)
+    except requests.exceptions.HTTPError as e:
+        body = ""
+        try:
+            body = e.response.text[:500]
+        except Exception:
+            pass
+        logger.error(
+            "Server returned HTTP %s. Response body (first 500 chars): %r",
+            e.response.status_code if e.response is not None else "?", body
+        )
     except requests.RequestException as e:
         logger.error("Failed to send data: %s", e)
 
