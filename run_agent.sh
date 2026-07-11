@@ -30,6 +30,21 @@ CLUSTER_NAME="${CLUSTER_NAME:-slurm}"
 # Leave blank for CPU-only clusters or clusters where all jobs specify the model.
 DEFAULT_GPU_MODEL="${DEFAULT_GPU_MODEL:-}"
 
+# SSL / HTTPS options — needed when the dashboard is behind a reverse proxy
+# (e.g., Open OnDemand) that uses an internal or self-signed certificate.
+#
+# SSL_NO_VERIFY=true  — skip certificate verification entirely.
+#   WARNING: Only use on trusted internal networks.
+#   Example: SSL_NO_VERIFY=true /share/hpc_shared/shovly/run_agent.sh
+SSL_NO_VERIFY="${SSL_NO_VERIFY:-false}"
+#
+# SSL_CA_BUNDLE=/path/to/bundle.pem  — trust a specific CA certificate bundle.
+#   Preferred over SSL_NO_VERIFY. Point this at your institution's CA bundle.
+#   Common paths:
+#     RHEL/CentOS/Rocky: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+#     Debian/Ubuntu:     /etc/ssl/certs/ca-certificates.crt
+SSL_CA_BUNDLE="${SSL_CA_BUNDLE:-}"
+
 # --------------------------------------------------------------------------
 # Locate Python — prefer the local venv, fall back to system python3
 # --------------------------------------------------------------------------
@@ -57,4 +72,6 @@ export SLURM_BIN_DIR
 exec "$PYTHON" "$SCRIPT_DIR/agent.py" \
     "$DASHBOARD_URL" \
     --cluster-name="$CLUSTER_NAME" \
-    ${DEFAULT_GPU_MODEL:+--default-gpu-model="$DEFAULT_GPU_MODEL"}
+    ${DEFAULT_GPU_MODEL:+--default-gpu-model="$DEFAULT_GPU_MODEL"} \
+    $([ "${SSL_NO_VERIFY:-false}" = "true" ] && echo "--ssl-no-verify") \
+    ${SSL_CA_BUNDLE:+--ssl-ca-bundle="$SSL_CA_BUNDLE"}

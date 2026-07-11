@@ -185,6 +185,8 @@ Edit the configuration block at the top of `run_agent.sh`, or export variables b
 | `DASHBOARD_URL` | Agent endpoint URL | `http://localhost:8000/api/agent/data` |
 | `CLUSTER_NAME` | Display name for this cluster | `slurm` |
 | `DEFAULT_GPU_MODEL` | Fallback GPU model (leave blank if not needed) | _(empty)_ |
+| `SSL_NO_VERIFY` | Set `true` to skip TLS verification (internal networks only) | `false` |
+| `SSL_CA_BUNDLE` | Path to a PEM CA bundle for HTTPS (preferred over `SSL_NO_VERIFY`) | _(empty)_ |
 
 ### 4. Add to crontab
 
@@ -365,6 +367,8 @@ Copy `.env.example` to `.env` and fill in values for your site. `setup.sh` gener
 | `UVICORN_PORT` | Server | Port for bare-metal mode (default `8000`) |
 | `CLUSTER_NAME` | Agent | Display name for this cluster in the dashboard |
 | `DEFAULT_GPU_MODEL` | Agent | Fallback GPU model when jobs don't specify one (leave blank for CPU-only clusters) |
+| `SSL_NO_VERIFY` | Agent | Set `true` to disable TLS certificate verification — use only on trusted internal networks |
+| `SSL_CA_BUNDLE` | Agent | Path to a PEM CA bundle for HTTPS (e.g. `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`) |
 | `DB_PATH` | Both | Absolute path to the SQLite historical database |
 
 ---
@@ -391,6 +395,32 @@ docker compose up -d
 2. Check the cron log: `tail -50 /var/log/shovly-agent.log`
 3. Test server reachability from the login node: `curl -s http://<server>:8000/api/clusters`
 4. Verify Slurm is accessible: `squeue --version`
+
+### `SSLCertVerificationError` when posting to an HTTPS dashboard
+
+This occurs when the dashboard is behind a reverse proxy (e.g., Open OnDemand) using an institution-issued certificate that is not in the system's default CA trust store.
+
+**Option A — trust the institutional CA bundle (recommended):**
+
+```bash
+# Find the system bundle on RHEL/CentOS/Rocky
+SSL_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ./run_agent.sh
+
+# Or set it permanently in cron:
+# */5 * * * * SSL_CA_BUNDLE=/etc/pki/... /share/hpc_shared/shovly/run_agent.sh >> ...
+```
+
+**Option B — disable verification (trusted networks only):**
+
+```bash
+SSL_NO_VERIFY=true ./run_agent.sh
+```
+
+You can also confirm which CA issued the proxy certificate:
+
+```bash
+openssl s_client -connect your-ood-host:443 2>&1 | grep -A5 "Certificate chain"
+```
 
 ### Jobs matched to unexpected cloud instances
 

@@ -5,7 +5,7 @@ import subprocess
 import logging
 import argparse
 import time as time_module
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import requests
@@ -476,6 +476,20 @@ def main():
              "(e.g. 'a30'). Use for clusters where users submit --gres=gpu:N without "
              "specifying the model."
     )
+    parser.add_argument(
+        "--ssl-no-verify", action="store_true",
+        default=(os.environ.get("SSL_NO_VERIFY", "").lower() in ("1", "true", "yes")),
+        help="Disable SSL certificate verification. Use when the dashboard is behind a "
+             "proxy with an internal/self-signed certificate the system cannot validate. "
+             "Can also be set via SSL_NO_VERIFY=true env var. "
+             "WARNING: Only use on trusted internal networks."
+    )
+    parser.add_argument(
+        "--ssl-ca-bundle", default=os.environ.get("SSL_CA_BUNDLE", ""), metavar="PATH",
+        help="Path to a PEM CA bundle to trust for HTTPS connections. Use when the "
+             "dashboard uses a certificate signed by an internal CA. "
+             "Can also be set via SSL_CA_BUNDLE=/path/to/bundle.pem env var."
+    )
     args = parser.parse_args()
 
     slurm_bin_dir = os.environ.get('SLURM_BIN_DIR')
@@ -514,11 +528,27 @@ def main():
         "cluster_name":   args.cluster_name,
         "jobs":           jobs,
         "completed_jobs": completed_jobs,
-        "timestamp":      datetime.utcnow().isoformat(),
+        "timestamp":      datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
     }
 
+    # Determine SSL verification mode for the HTTPS POST
+    if args.ssl_no_verify:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        ssl_verify: bool | str = False
+        logger.warning(
+            "SSL certificate verification is DISABLED (--ssl-no-verify / SSL_NO_VERIFY). "
+            "Only use this on trusted internal networks."
+        )
+    elif args.ssl_ca_bundle:
+        ssl_verify = args.ssl_ca_bundle
+        logger.info("Using custom CA bundle for HTTPS: %s", ssl_verify)
+    else:
+        ssl_verify = True
+
     try:
-        response = requests.post(args.dashboard_url, json=payload, timeout=15)
+        response = requests.post(args.dashboard_url, json=payload, timeout=15,
+                                 verify=ssl_verify)
         response.raise_for_status()
         logger.info("Success: %s", response.json())
         # Only advance the checkpoint after a successful submission
