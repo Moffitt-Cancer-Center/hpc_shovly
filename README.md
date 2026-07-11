@@ -403,11 +403,7 @@ This occurs when the dashboard is behind a reverse proxy (e.g., Open OnDemand) u
 **Option A — trust the institutional CA bundle (recommended):**
 
 ```bash
-# Find the system bundle on RHEL/CentOS/Rocky
 SSL_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ./run_agent.sh
-
-# Or set it permanently in cron:
-# */5 * * * * SSL_CA_BUNDLE=/etc/pki/... /share/hpc_shared/shovly/run_agent.sh >> ...
 ```
 
 **Option B — disable verification (trusted networks only):**
@@ -416,10 +412,39 @@ SSL_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ./run_agent.sh
 SSL_NO_VERIFY=true ./run_agent.sh
 ```
 
-You can also confirm which CA issued the proxy certificate:
+> **Note:** `SSL_NO_VERIFY` and `SSL_CA_BUNDLE` must be set as environment variables — they are not arguments. `./run_agent.sh --ssl-no-verify` has no effect.
+
+You can confirm which CA issued the proxy certificate:
 
 ```bash
 openssl s_client -connect your-ood-host:443 2>&1 | grep -A5 "Certificate chain"
+```
+
+### Agent logs "Server returned HTTP 200 but body is not JSON" — OOD Dex login page
+
+The Open OnDemand `/rnode/<host>/<port>/` reverse proxy **requires an authenticated browser session**. When called without a valid OOD session cookie it redirects to the Dex OIDC login page (HTTP 200, HTML body). This redirect cannot be satisfied by an unattended cron job regardless of SSL settings.
+
+**Solution — connect directly to the dashboard, bypassing OOD:**
+
+The login node and dashboard server are typically on the same internal network, so the port is reachable directly. Test from the login node:
+
+```bash
+curl -s http://<dashboard-host>:<port>/api/clusters
+```
+
+If that returns JSON, update `DASHBOARD_URL` in `run_agent.sh` (or in cron) to the direct URL:
+
+```bash
+DASHBOARD_URL=http://<dashboard-host>:<port>/api/agent/data
+```
+
+No SSL configuration is needed for a plain HTTP connection on an internal network. If a firewall blocks direct access, ask your sysadmin to open the dashboard port between the login node and the dashboard host, or use an SSH tunnel:
+
+```bash
+# On the login node — forward local 8882 to the dashboard host
+ssh -fN -L 8882:<dashboard-host>:8882 <dashboard-host>
+# Then set:
+DASHBOARD_URL=http://localhost:8882/api/agent/data
 ```
 
 ### Jobs matched to unexpected cloud instances
