@@ -10,10 +10,11 @@
 #                     [--cluster-name NAME] [--output PATH] [--no-chunk]
 #
 # Output: data/sacct_raw.csv  (pipe-delimited, NO header, safe to re-run)
-# Columns: JobID|User|Submit|Start|End|ReqCPUS|ReqMem|ReqTRES|ElapsedRaw|TimelimitRaw|State|ClusterName
+# Columns: JobID|User|Submit|Start|End|ReqCPUS|ReqMem|ReqTRES|ElapsedRaw|TimelimitRaw|State|NodeList|ClusterName
 #
 # After dumping, import with:
-#   python3 import_history.py data/sacct_raw.csv --db data/historical.db
+#   python3 import_history.py data/sacct_raw.csv --db data/historical.db \
+#       --node-gpu-map data/node_gpu_map.csv --force-update
 #
 # Environment:
 #   SLURM_BIN_DIR  - Path to Slurm bin directory (e.g. /cm/shared/apps/slurm/current/bin)
@@ -167,7 +168,7 @@ run_chunk() {
         "$tmp_out" >> "$OUTPUT_FILE"
 
     local filtered
-    filtered=$(awk -F'|' 'NF==11 && $1 !~ /\./ && $4 != "Unknown" && $4 != ""' "$tmp_out" | wc -l)
+    filtered=$(awk -F'|' 'NF==12 && $1 !~ /\./ && $4 != "Unknown" && $4 != ""' "$tmp_out" | wc -l)
     printf "%d records appended (from %d raw lines)\n" "$filtered" "$raw_lines"
 
     rm -f "$tmp_out" "$tmp_err"
