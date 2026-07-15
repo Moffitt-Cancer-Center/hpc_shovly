@@ -276,7 +276,7 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
     conn = sqlite3.connect(db_path)
     # Tune SQLite for bulk-import throughput
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=OFF")       # safe for batch import; re-run on crash
+    conn.execute("PRAGMA synchronous=NORMAL")    # safe against corruption; still fast
     conn.execute("PRAGMA cache_size=-262144")    # 256 MB page cache
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA mmap_size=2147483648")  # 2 GB memory-mapped I/O
