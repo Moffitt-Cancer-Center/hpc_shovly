@@ -128,13 +128,15 @@ fi
 TOTAL_BEFORE=$(wc -l < "$OUTPUT_FILE")
 
 # --------------------------------------------------------------------------
-# Core function: run one sacct chunk and append results
+# Core function: run one sacct chunk and append results.
+# Returns 0 on success, 1 on failure (caller decides how to retry).
 # --------------------------------------------------------------------------
 run_chunk() {
     local chunk_start="$1"
     local chunk_end="$2"
+    local indent="${3:-  }"   # optional indent prefix for nested calls
 
-    printf "  [%s] %s → %s ... " "$(date '+%H:%M:%S')" "$chunk_start" "$chunk_end"
+    printf "%s[%s] %s → %s ... " "$indent" "$(date '+%H:%M:%S')" "$chunk_start" "$chunk_end"
 
     local tmp_out tmp_err
     tmp_out="$(mktemp)"
@@ -150,12 +152,11 @@ run_chunk() {
     # Always show sacct stderr so failures are never silent
     if [ -s "$tmp_err" ]; then
         echo ""
-        echo "  [sacct stderr]:"
-        sed 's/^/    /' "$tmp_err"
+        echo "${indent}[sacct stderr]:"
+        sed "s/^/${indent}  /" "$tmp_err"
     fi
 
     if [ $exit_code -ne 0 ]; then
-        echo "  WARNING: sacct exited $exit_code for $chunk_start → $chunk_end. Skipping chunk."
         rm -f "$tmp_out" "$tmp_err"
         return 1
     fi
@@ -173,6 +174,44 @@ run_chunk() {
 
     rm -f "$tmp_out" "$tmp_err"
     return 0
+}
+
+# --------------------------------------------------------------------------
+# run_chunk_with_fallback: try monthly; on failure sub-chunk into weeks;
+# on further failure sub-chunk weeks into days.
+# --------------------------------------------------------------------------
+run_chunk_with_fallback() {
+    local chunk_start="$1"
+    local chunk_end="$2"
+
+    if run_chunk "$chunk_start" "$chunk_end" "  "; then
+        return 0
+    fi
+
+    # Monthly chunk failed — fall back to weekly sub-chunks
+    echo "  ↳ Monthly chunk failed; retrying as weekly sub-chunks..."
+    local cur="$chunk_start"
+    while [[ "$cur" < "$chunk_end" ]]; do
+        local nxt
+        nxt=$(date -d "$cur + 7 days" +%Y-%m-%d)
+        [[ "$nxt" > "$chunk_end" ]] && nxt="$chunk_end"
+
+        if ! run_chunk "$cur" "$nxt" "      "; then
+            # Weekly sub-chunk failed — fall back to daily sub-chunks
+            echo "      ↳ Weekly sub-chunk failed; retrying as daily sub-chunks..."
+            local day="$cur"
+            while [[ "$day" < "$nxt" ]]; do
+                local next_day
+                next_day=$(date -d "$day + 1 day" +%Y-%m-%d)
+                [[ "$next_day" > "$nxt" ]] && next_day="$nxt"
+                if ! run_chunk "$day" "$next_day" "          "; then
+                    echo "          WARNING: daily chunk $day → $next_day failed. Skipping."
+                fi
+                day="$next_day"
+            done
+        fi
+        cur="$nxt"
+    done
 }
 
 # --------------------------------------------------------------------------
@@ -214,7 +253,7 @@ else
         chunk_end=$(printf "%04d-%02d-01" $next_year $next_month)
 
         printf "  Chunk %d/%d " $chunk_num $total_months
-        run_chunk "$chunk_start" "$chunk_end"
+        run_chunk_with_fallback "$chunk_start" "$chunk_end"
 
         # Advance to next month
         cur_year=$next_year
