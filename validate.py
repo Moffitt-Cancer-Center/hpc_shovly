@@ -15,6 +15,7 @@ Subcommands:
     cluster        Per-cluster stats
     cloud          AWS vs Azure cost comparison and instance distribution
     gpu            GPU job detection, model distribution, cost impact
+    cpu            CPU-only job analysis: vCPU/mem distribution, instance mapping, cost/CPU-hour
     pricing        Verify stored instance prices match the built-in catalog
     recalc-check   Recalculate every stored cost and compare vs what is in DB
     live           Compare live dashboard API vs squeue / sacct on the cluster
@@ -489,7 +490,171 @@ def cmd_gpu(args):
     conn.close()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. PRICING VALIDATION
+# 6. CPU ANALYSIS
+# ─────────────────────────────────────────────────────────────────────────────
+def cmd_cpu(args):
+    section("CPU-ONLY JOB ANALYSIS")
+    conn  = open_db(args.db)
+    where, params = build_where(args)
+
+    # Add cpu_only filter for all subsequent queries
+    cpu_where  = (where + " AND gpu_count = 0") if where else "WHERE gpu_count = 0"
+    cpu_params = params[:]
+
+    # ── overview ──────────────────────────────────────────────────────────────
+    totals = conn.execute(f"""
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN gpu_count=0 THEN 1 ELSE 0 END) AS cpu_jobs,
+               SUM(CASE WHEN gpu_count>0 THEN 1 ELSE 0 END) AS gpu_jobs,
+               SUM(CASE WHEN gpu_count=0 THEN elapsed_min ELSE 0 END) AS cpu_min,
+               SUM(CASE WHEN gpu_count=0 THEN aws_total   ELSE 0 END) AS cpu_aws,
+               SUM(CASE WHEN gpu_count=0 THEN azure_total ELSE 0 END) AS cpu_azure,
+               SUM(aws_total)   AS all_aws,
+               SUM(azure_total) AS all_azure
+        FROM jobs {where}
+    """, params).fetchone()
+
+    t = totals["total"] or 1
+    print(f"  CPU jobs       : {totals['cpu_jobs']:,}  ({pct(totals['cpu_jobs'], t)} of all jobs)")
+    print(f"  GPU jobs       : {totals['gpu_jobs']:,}  ({pct(totals['gpu_jobs'], t)})")
+    print()
+    print(f"  CPU compute    : {fmt_hours(totals['cpu_min'] or 0)}")
+    print(f"  CPU AWS cost   : {fmt_money(totals['cpu_aws']   or 0)}  ({pct(totals['cpu_aws']   or 0, totals['all_aws']   or 1)} of AWS total)")
+    print(f"  CPU Azure cost : {fmt_money(totals['cpu_azure'] or 0)}  ({pct(totals['cpu_azure'] or 0, totals['all_azure'] or 1)} of Azure total)")
+
+    # ── vCPU distribution ─────────────────────────────────────────────────────
+    print()
+    print(BOLD("  vCPU count distribution (CPU jobs only):"))
+    vcpu_rows = conn.execute(f"""
+        SELECT CASE
+                 WHEN req_cpus <=  4 THEN '1–4   (serial)'
+                 WHEN req_cpus <=  8 THEN '5–8   (small parallel)'
+                 WHEN req_cpus <= 16 THEN '9–16  (medium parallel)'
+                 WHEN req_cpus <= 32 THEN '17–32 (large parallel)'
+                 ELSE                     '33+   (MPI / large)'
+               END AS bucket,
+               COUNT(*) AS jobs,
+               ROUND(SUM(elapsed_min)/60.0, 1) AS hours,
+               ROUND(SUM(aws_total),   2) AS aws,
+               ROUND(SUM(azure_total), 2) AS azure
+        FROM jobs {cpu_where}
+        GROUP BY bucket
+        ORDER BY MIN(req_cpus)
+    """, cpu_params).fetchall()
+    print_table(
+        ["vCPU Range", "Jobs", "Compute Hrs", "AWS Total", "Azure Total"],
+        [(r["bucket"], f"{r['jobs']:,}", f"{r['hours']:,.1f}",
+          fmt_money(r["aws"]), fmt_money(r["azure"]))
+         for r in vcpu_rows]
+    )
+
+    # ── memory distribution ───────────────────────────────────────────────────
+    print()
+    print(BOLD("  Memory distribution (CPU jobs only):"))
+    mem_rows = conn.execute(f"""
+        SELECT CASE
+                 WHEN req_mem_mb <=  8192 THEN '≤ 8 GB'
+                 WHEN req_mem_mb <= 32768 THEN '8–32 GB'
+                 WHEN req_mem_mb <= 131072 THEN '32–128 GB'
+                 ELSE                          '> 128 GB'
+               END AS bucket,
+               COUNT(*) AS jobs,
+               ROUND(SUM(elapsed_min)/60.0, 1) AS hours,
+               ROUND(SUM(aws_total),   2) AS aws
+        FROM jobs {cpu_where}
+        GROUP BY bucket
+        ORDER BY MIN(req_mem_mb)
+    """, cpu_params).fetchall()
+    print_table(
+        ["Memory Range", "Jobs", "Compute Hrs", "AWS Total"],
+        [(r["bucket"], f"{r['jobs']:,}", f"{r['hours']:,.1f}", fmt_money(r["aws"]))
+         for r in mem_rows]
+    )
+
+    # ── instance mapping distribution ─────────────────────────────────────────
+    print()
+    print(BOLD(f"  Top {args.top} cloud instances used for CPU jobs (AWS):"))
+    inst_rows = conn.execute(f"""
+        SELECT aws_instance,
+               COUNT(*) AS jobs,
+               ROUND(SUM(elapsed_min)/60.0, 1) AS hours,
+               ROUND(SUM(aws_total),   2) AS aws,
+               ROUND(SUM(azure_total), 2) AS azure
+        FROM jobs {cpu_where}
+        GROUP BY aws_instance
+        ORDER BY jobs DESC
+        LIMIT ?
+    """, cpu_params + [args.top]).fetchall()
+    print_table(
+        ["AWS Instance", "Jobs", "Compute Hrs", "AWS Total", "Azure Total"],
+        [(r["aws_instance"] or "(none)", f"{r['jobs']:,}", f"{r['hours']:,.1f}",
+          fmt_money(r["aws"]), fmt_money(r["azure"]))
+         for r in inst_rows]
+    )
+
+    # ── cost per CPU-hour ─────────────────────────────────────────────────────
+    print()
+    print(BOLD("  Cost per CPU-hour by instance (AWS, top instances by job count):"))
+    eff_rows = conn.execute(f"""
+        SELECT aws_instance,
+               COUNT(*) AS jobs,
+               ROUND(SUM(aws_total) / MAX(1, SUM(elapsed_min * req_cpus) / 60.0), 4)
+                   AS aws_per_cpu_hr
+        FROM jobs {cpu_where}
+          AND elapsed_min > 0 AND req_cpus > 0
+        GROUP BY aws_instance
+        ORDER BY jobs DESC
+        LIMIT ?
+    """, cpu_params + [args.top]).fetchall()
+    print_table(
+        ["AWS Instance", "Jobs", "$/CPU-hour"],
+        [(r["aws_instance"] or "(none)", f"{r['jobs']:,}", f"${r['aws_per_cpu_hr']:.4f}")
+         for r in eff_rows]
+    )
+
+    # ── spot-check ────────────────────────────────────────────────────────────
+    print()
+    print(BOLD("  Spot-check: 10 random CPU jobs — stored cost vs catalog recalculation"))
+    sample = conn.execute(f"""
+        SELECT job_id, cluster, req_cpus, req_mem_mb,
+               time_limit_min, elapsed_min,
+               COALESCE(num_nodes, 1) AS num_nodes,
+               aws_instance, aws_total, azure_instance, azure_total
+        FROM jobs {cpu_where}
+        ORDER BY RANDOM() LIMIT 10
+    """, cpu_params).fetchall()
+
+    headers = ["Job ID", "CPUs", "Mem GB", "Nodes", "Hours",
+               "AWS Inst", "DB $", "Calc $", "Δ", "OK?"]
+    table_rows = []
+    issues = 0
+    for r in sample:
+        th = (r["time_limit_min"] or r["elapsed_min"]) / 60.0
+        n  = r["num_nodes"] or 1
+        inst   = find_best_instance(AWS_INSTANCES, r["req_cpus"], r["req_mem_mb"], 0, "")
+        calc   = round(inst["price"] * th * n, 4)
+        stored = round(r["aws_total"], 4)
+        diff   = abs(calc - stored)
+        ok = "✓" if diff < 0.01 else "✗"
+        if ok == "✗":
+            issues += 1
+        table_rows.append([
+            r["job_id"][:16], r["req_cpus"], f"{r['req_mem_mb']/1024:.0f}",
+            n, f"{th:.2f}", inst["name"][:22],
+            f"${stored:.4f}", f"${calc:.4f}",
+            f"${diff:.4f}" if diff >= 0.01 else "—", ok,
+        ])
+    print_table(headers, table_rows)
+    if issues:
+        print(YELLOW(f"\n  ⚠  {issues} jobs have stored cost ≠ recalculated cost > $0.01 — run 'recalc-check' for full audit"))
+    else:
+        print(GREEN("\n  ✓  All spot-checked CPU jobs match catalog pricing"))
+
+    conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. PRICING VALIDATION
 # ─────────────────────────────────────────────────────────────────────────────
 def cmd_pricing(args):
     section("CLOUD PRICING VALIDATION")
@@ -890,6 +1055,7 @@ COMMANDS = {
     "cluster":      cmd_cluster,
     "cloud":        cmd_cloud,
     "gpu":          cmd_gpu,
+    "cpu":          cmd_cpu,
     "pricing":      cmd_pricing,
     "recalc-check": cmd_recalc_check,
     "live":         cmd_live,
@@ -903,6 +1069,7 @@ def main():
         epilog="  Example:\n"
                "    python3 validate.py all --start 2025-01-01\n"
                "    python3 validate.py gpu --cluster slurm --start 2025-06-01\n"
+               "    python3 validate.py cpu --cluster slurm --start 2025-06-01\n"
                "    python3 validate.py live --api http://red2.moffitt.org:8000 "
                "--slurm-bin /cm/shared/apps/slurm/current/bin\n"
                "    python3 validate.py recalc-check --start 2025-01-01 --top 50\n"
@@ -930,7 +1097,7 @@ def main():
     print(f"DB: {args.db}  |  cluster: {args.cluster}  |  "
           f"range: {args.start or 'all'} → {args.end or 'now'}")
 
-    offline = ["summary", "users", "cluster", "cloud", "gpu", "pricing", "recalc-check", "anomalies"]
+    offline = ["summary", "users", "cluster", "cloud", "gpu", "cpu", "pricing", "recalc-check", "anomalies"]
     if args.command == "all":
         for cmd in offline:
             COMMANDS[cmd](args)
