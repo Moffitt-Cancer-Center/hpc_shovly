@@ -13,16 +13,18 @@ the two catalogs in sync if you update instance pricing.
 """
 
 import argparse
+import functools
 import logging
 import os
 import sqlite3
 import sys
 import time as time_module
+from datetime import datetime as _datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 10_000
+BATCH_SIZE = 100_000
 
 # ---------------------------------------------------------------------------
 # Instance catalogs — loaded from CSV price lists at startup
@@ -111,7 +113,7 @@ def parse_sacct_timestamp(ts_str):
     if not s or s.lower() in ("unknown", "none", ""):
         return 0
     try:
-        return int(time_module.mktime(time_module.strptime(s, "%Y-%m-%dT%H:%M:%S")))
+        return int(_datetime.fromisoformat(s).timestamp())
     except (ValueError, OverflowError):
         return 0
 
@@ -177,6 +179,40 @@ def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
     return min(catalog, key=lambda x: x["price"])
 
 
+@functools.lru_cache(maxsize=8192)
+def _aws_instance(cpus, mem_mb, gpu_count, gpu_model):
+    """Cached lookup — jobs sharing the same resource profile skip catalog scans."""
+    return find_best_instance(AWS_INSTANCES, cpus, mem_mb, gpu_count, gpu_model)
+
+
+@functools.lru_cache(maxsize=8192)
+def _azure_instance(cpus, mem_mb, gpu_count, gpu_model):
+    """Cached lookup — jobs sharing the same resource profile skip catalog scans."""
+    return find_best_instance(AZURE_INSTANCES, cpus, mem_mb, gpu_count, gpu_model)
+
+
+def parse_tres_all(tres_str):
+    """Parse GPU count, GPU model, and node count from sacct ReqTRES in a single pass."""
+    gpu_count, gpu_model, num_nodes = 0, "", 1
+    if not tres_str:
+        return gpu_count, gpu_model, num_nodes
+    for part in tres_str.strip().lower().split(","):
+        part = part.strip()
+        if part.startswith("node="):
+            try:
+                num_nodes = max(1, int(part.split("=", 1)[1]))
+            except ValueError:
+                pass
+        elif "gres/gpu" in part and "=" in part:
+            key, val = part.rsplit("=", 1)
+            try:
+                gpu_count = int(val)
+            except ValueError:
+                gpu_count = 1
+            gpu_model = key.split(":", 1)[1] if ":" in key else ""
+    return gpu_count, gpu_model, num_nodes
+
+
 # ---------------------------------------------------------------------------
 # SQLite schema
 # ---------------------------------------------------------------------------
@@ -198,6 +234,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     aws_total     REAL    DEFAULT 0.0,
     azure_instance TEXT   DEFAULT '',
     azure_total   REAL    DEFAULT 0.0,
+    num_nodes     INTEGER DEFAULT 1,
     PRIMARY KEY (job_id, cluster)
 );
 CREATE INDEX IF NOT EXISTS idx_start   ON jobs(start_time);
@@ -214,6 +251,11 @@ def init_db(conn):
         stmt = stmt.strip()
         if stmt:
             conn.execute(stmt)
+    # Migrate DBs that pre-date the num_nodes column
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN num_nodes INTEGER DEFAULT 1")
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -232,11 +274,25 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
     INSERT_SQL = INSERT_SQL_REPLACE if force_update else INSERT_SQL_IGNORE
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     conn = sqlite3.connect(db_path)
+    # Tune SQLite for bulk-import throughput
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=OFF")       # safe for batch import; re-run on crash
+    conn.execute("PRAGMA cache_size=-262144")    # 256 MB page cache
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA mmap_size=2147483648")  # 2 GB memory-mapped I/O
     init_db(conn)
 
     inserted = 0
-    skipped = 0
-    batch = []
+    skipped  = 0
+    batch    = []
+
+    # Pre-load existing job IDs so INSERT OR IGNORE rows can be skipped before
+    # expensive TRES parsing and find_best_instance catalog scans.
+    existing_ids: set = set()
+    if not force_update:
+        logger.info("Pre-loading existing job IDs (may take a moment for large DBs)...")
+        existing_ids = set(row[0] for row in conn.execute("SELECT job_id FROM jobs"))
+        logger.info("  %d existing records found — will skip on re-import.", len(existing_ids))
 
     logger.info("Reading: %s", csv_path)
     with open(csv_path, "r") as fh:
@@ -260,6 +316,11 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
                 skipped += 1
                 continue  # Skip job steps (e.g. 12345.batch)
 
+            # Skip already-imported rows before any expensive work
+            if existing_ids and job_id in existing_ids:
+                skipped += 1
+                continue
+
             username = parts[1].strip()
             start_ts = parse_sacct_timestamp(parts[3])
             if start_ts == 0:
@@ -282,8 +343,7 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
             except ValueError:
                 time_limit_min = 0
 
-            gpu_count, gpu_model = parse_tres_gpu(parts[7])
-            num_nodes = parse_tres_node_count(parts[7])
+            gpu_count, gpu_model, num_nodes = parse_tres_all(parts[7])
             # GPU model resolution priority:
             #   1. Parsed directly from ReqTRES (most accurate)
             #   2. Node map lookup via NodeList (from scontrol show nodes)
@@ -301,8 +361,8 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
                 req_cpus  = max(1, req_cpus  // num_nodes)
                 gpu_count = max(1, gpu_count // num_nodes)
 
-            aws_inst   = find_best_instance(AWS_INSTANCES,   req_cpus, req_mem_mb, gpu_count, gpu_model)
-            azure_inst = find_best_instance(AZURE_INSTANCES, req_cpus, req_mem_mb, gpu_count, gpu_model)
+            aws_inst   = _aws_instance(req_cpus, req_mem_mb, gpu_count, gpu_model)
+            azure_inst = _azure_instance(req_cpus, req_mem_mb, gpu_count, gpu_model)
 
             # Use time_limit if available, otherwise fall back to elapsed
             time_hours = (time_limit_min or elapsed_min) / 60.0
@@ -335,6 +395,13 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
 
     conn.close()
     logger.info("Import complete.  Inserted: %d  |  Skipped: %d", inserted, skipped)
+    aws_ci, azure_ci = _aws_instance.cache_info(), _azure_instance.cache_info()
+    logger.info("AWS   cache: hits=%-8d misses=%-6d  hit rate=%.1f%%",
+                aws_ci.hits, aws_ci.misses,
+                100 * aws_ci.hits / max(1, aws_ci.hits + aws_ci.misses))
+    logger.info("Azure cache: hits=%-8d misses=%-6d  hit rate=%.1f%%",
+                azure_ci.hits, azure_ci.misses,
+                100 * azure_ci.hits / max(1, azure_ci.hits + azure_ci.misses))
 
 
 # ---------------------------------------------------------------------------
