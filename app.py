@@ -528,6 +528,23 @@ async def get_top_users(
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/date-range")
+async def get_date_range():
+    """Return the earliest and latest job start dates available in the database."""
+    try:
+        with _db_lock:
+            row = get_db().execute(
+                "SELECT date(MIN(start_time), 'unixepoch'), date(MAX(start_time), 'unixepoch') "
+                "FROM jobs WHERE start_time > 0"
+            ).fetchone()
+        min_date = row[0] if row and row[0] else None
+        max_date = row[1] if row and row[1] else None
+        return JSONResponse(content={"min_date": min_date, "max_date": max_date})
+    except Exception as exc:
+        logger.error("Date range query failed: %s", exc)
+        return JSONResponse(content={"min_date": None, "max_date": None})
+
+
 @app.get("/api/clusters")
 async def get_clusters():
     """Return the list of known cluster names from the historical database."""

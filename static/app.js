@@ -433,6 +433,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('hist-end').value   = today.toISOString().split('T')[0];
     document.getElementById('hist-start').value = thirtyAgo.toISOString().split('T')[0];
 
+    // Constrain date pickers to the actual range of available job data
+    fetch('/api/date-range').then(r => r.json()).then(data => {
+        const startEl = document.getElementById('hist-start');
+        const endEl   = document.getElementById('hist-end');
+        if (data.min_date) {
+            startEl.min = data.min_date;
+            endEl.min   = data.min_date;
+            // If the pre-filled start is before the earliest data, bump it forward
+            if (startEl.value < data.min_date) startEl.value = data.min_date;
+        }
+        if (data.max_date) {
+            startEl.max = data.max_date;
+            endEl.max   = data.max_date;
+        }
+    }).catch(() => {});
+
     // Populate cluster dropdown from /api/clusters
     fetch('/api/clusters').then(r => r.json()).then(data => {
         const sel    = document.getElementById('hist-cluster');
