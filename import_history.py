@@ -138,6 +138,12 @@ def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
                  if i["gpu_count"] >= gpu_count
                  and (not norm_gpu or i["gpu_model"] == norm_gpu)
                  and i["vcpus"] >= max(cpus, 1)]
+        # Pass 2.5: relax model but prefer Nvidia over AMD
+        if not c:
+            c = [i for i in catalog
+                 if i["gpu_count"] >= gpu_count
+                 and i.get("gpu_vendor", "nvidia") == "nvidia"
+                 and i["vcpus"] >= max(cpus, 1)]
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count and i["vcpus"] >= max(cpus, 1)]

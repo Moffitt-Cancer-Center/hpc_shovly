@@ -135,6 +135,40 @@ def parse_tres_gpu(tres_str):
     return 0, ''
 
 
+def parse_tres_node_count(tres_str):
+    """
+    Parse the node count from a sacct ReqTRES string.
+    Example: 'cpu=216,mem=2592G,node=27,billing=216,gres/gpu=27' -> 27
+    Returns 1 if the field is absent or unparseable.
+    """
+    if not tres_str:
+        return 1
+    for part in tres_str.strip().lower().split(','):
+        part = part.strip()
+        if part.startswith('node='):
+            try:
+                return max(1, int(part.split('=', 1)[1]))
+            except ValueError:
+                pass
+    return 1
+
+
+def parse_tres_mem_mb(tres_str):
+    """
+    Parse total memory from a sacct ReqTRES string.
+    Example: 'cpu=216,mem=2592G,node=27,...' -> 2654208  (2592 * 1024)
+    Returns 0 if absent.
+    """
+    if not tres_str:
+        return 0
+    for part in tres_str.strip().lower().split(','):
+        part = part.strip()
+        if part.startswith('mem='):
+            val = part.split('=', 1)[1]
+            return parse_mem_mb(val.upper())
+    return 0
+
+
 def parse_time_limit_minutes(time_str):
     """
     Parse squeue %l time-limit string to total minutes.
@@ -322,7 +356,7 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
 
     try:
         result = subprocess.run(
-            [squeue, '-h', '-t', 'RUNNING', '-o', '%i|%C|%m|%b|%l|%N'],
+            [squeue, '-h', '-t', 'RUNNING', '-o', '%i|%C|%m|%b|%l|%N|%D'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
         output = result.stdout.decode('utf-8').strip()
@@ -333,9 +367,9 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
         jobs = []
         for line in output.splitlines():
             parts = line.strip().split('|')
-            if len(parts) != 6:
+            if len(parts) != 7:
                 continue
-            job_id, cpus_str, mem_str, gres_str, time_str, nodelist_str = parts
+            job_id, cpus_str, mem_str, gres_str, time_str, nodelist_str, nodes_str = parts
             job_id = job_id.strip()
             try:
                 cpus = int(cpus_str.strip())
@@ -343,6 +377,10 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
                 cpus = 1
             mem_mb = parse_mem_mb(mem_str)
             time_limit_minutes = parse_time_limit_minutes(time_str)
+            try:
+                num_nodes = max(1, int(nodes_str.strip()))
+            except ValueError:
+                num_nodes = 1
 
             # --- GPU detection -----------------------------------------------
             # Priority 1: sacct ReqTRES (authoritative)
@@ -358,6 +396,14 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
                 gpu_model  = node_gpu_map.get(first_node, '')
             # -----------------------------------------------------------------
 
+            # Normalise to per-node resources so find_best_instance can match
+            # a single cloud instance rather than hunting for one with N×GPUs.
+            # squeue %m is already per-node; only CPUs and GPU count are total.
+            if num_nodes > 1:
+                cpus      = max(1, cpus // num_nodes)
+                if gpu_count > 0:
+                    gpu_count = max(1, gpu_count // num_nodes)
+
             jobs.append({
                 "job_id":             job_id,
                 "cpus":               cpus,
@@ -365,6 +411,7 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
                 "gpu_count":          gpu_count,
                 "gpu_model":          gpu_model,
                 "time_limit_minutes": time_limit_minutes,
+                "num_nodes":          num_nodes,
             })
         return jobs
 
@@ -432,6 +479,23 @@ def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None, no
                 first_node = parse_nodelist_first(parts[11])
                 gpu_model = node_gpu_map.get(first_node, '')
 
+            # Normalise to per-node so find_best_instance works correctly for
+            # multi-node jobs (e.g. 27-node MPI jobs with 1 GPU each).
+            # sacct ReqMem is per-node/per-cpu depending on suffix, so use the
+            # TRES mem total and divide by node count for consistency.
+            num_nodes   = parse_tres_node_count(parts[7])
+            tres_mem_mb = parse_tres_mem_mb(parts[7])
+            if num_nodes > 1:
+                req_cpus = max(1, req_cpus // num_nodes)
+                if tres_mem_mb > 0:
+                    req_mem_mb_val = max(1, tres_mem_mb // num_nodes)
+                else:
+                    req_mem_mb_val = parse_sacct_mem_mb(parts[6])
+                if gpu_count > 0:
+                    gpu_count = max(1, gpu_count // num_nodes)
+            else:
+                req_mem_mb_val = parse_sacct_mem_mb(parts[6])
+
             jobs.append({
                 'job_id':         job_id,
                 'cluster':        cluster_name,
@@ -439,12 +503,13 @@ def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None, no
                 'start_time':     start_ts,
                 'end_time':       parse_sacct_timestamp(parts[4]),
                 'req_cpus':       req_cpus,
-                'req_mem_mb':     parse_sacct_mem_mb(parts[6]),
+                'req_mem_mb':     req_mem_mb_val,
                 'gpu_count':      gpu_count,
                 'gpu_model':      gpu_model,
                 'time_limit_min': time_limit_min,
                 'elapsed_min':    elapsed_min,
                 'state':          parts[10].strip(),
+                'num_nodes':      num_nodes,
             })
         return jobs
 

@@ -27,6 +27,7 @@ class JobInfo(BaseModel):
     gpu_count: int
     gpu_model: str              # e.g. "a30", "a100", "" for none
     time_limit_minutes: int = 0 # 0 = UNLIMITED or not reported by agent
+    num_nodes: int = 1          # Number of nodes allocated to the job
 
 class CompletedJob(BaseModel):
     job_id: str
@@ -41,6 +42,7 @@ class CompletedJob(BaseModel):
     time_limit_min: int = 0
     elapsed_min: int = 0
     state: str = ""
+    num_nodes: int = 1          # Number of nodes allocated to the job
 
 class AgentPayload(BaseModel):
     cluster_name: str
@@ -113,12 +115,19 @@ def init_db() -> None:
             aws_total      REAL    DEFAULT 0.0,
             azure_instance TEXT    DEFAULT '',
             azure_total    REAL    DEFAULT 0.0,
+            num_nodes      INTEGER DEFAULT 1,
             PRIMARY KEY (job_id, cluster)
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_start   ON jobs(start_time)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user    ON jobs(username)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster ON jobs(cluster)")
+    # Migrate existing databases that pre-date the num_nodes column
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN num_nodes INTEGER DEFAULT 1")
+        logger.info("Migrated jobs table: added num_nodes column.")
+    except Exception:
+        pass  # Column already exists — normal on every run after first migration
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cluster_costs (
             cluster          TEXT PRIMARY KEY,
@@ -190,7 +199,13 @@ def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
                  if i["gpu_count"] >= gpu_count
                  and (not norm_gpu or i["gpu_model"] == norm_gpu)
                  and i["vcpus"] >= max(cpus, 1)]
-        # Pass 3: relax GPU model (any GPU model will do)
+        # Pass 2.5: relax GPU model but keep Nvidia (avoids matching cheaper AMD instances)
+        if not c:
+            c = [i for i in catalog
+                 if i["gpu_count"] >= gpu_count
+                 and i.get("gpu_vendor", "nvidia") == "nvidia"
+                 and i["vcpus"] >= max(cpus, 1)]
+        # Pass 3: any GPU vendor (last resort before falling to CPU-only)
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count
@@ -248,14 +263,15 @@ async def receive_agent_data(payload: AgentPayload):
                 cj.gpu_count, cj.gpu_model,
                 cj.time_limit_min, cj.elapsed_min,
                 cj.state,
-                aws_inst["name"],   round(aws_inst["price"]   * time_hours, 4),
-                azure_inst["name"], round(azure_inst["price"] * time_hours, 4),
+                aws_inst["name"],   round(aws_inst["price"]   * time_hours * cj.num_nodes, 4),
+                azure_inst["name"], round(azure_inst["price"] * time_hours * cj.num_nodes, 4),
+                cj.num_nodes,
             ))
         try:
             with _db_lock:
                 db = get_db()
                 db.executemany(
-                    "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     rows
                 )
                 db.commit()
@@ -293,15 +309,16 @@ def process_and_aggregate_metrics():
             gpu_count          = job["gpu_count"]
             gpu_model          = job["gpu_model"]
             time_limit_minutes = job.get("time_limit_minutes", 0)
+            num_nodes          = job.get("num_nodes", 1)
 
             aws_inst   = find_best_instance(AWS_INSTANCES,   cpus, mem_mb, gpu_count, gpu_model)
             azure_inst = find_best_instance(AZURE_INSTANCES, cpus, mem_mb, gpu_count, gpu_model)
 
-            # Projected total cost = hourly rate × time limit hours
+            # Projected total cost = hourly rate × time limit hours × nodes
             # Fall back to 1 h if time limit is 0 (UNLIMITED / not reported)
             time_hours = time_limit_minutes / 60.0 if time_limit_minutes > 0 else 1.0
-            aws_total   = round(aws_inst["price"]   * time_hours, 2)
-            azure_total = round(azure_inst["price"] * time_hours, 2)
+            aws_total   = round(aws_inst["price"]   * time_hours * num_nodes, 2)
+            azure_total = round(azure_inst["price"] * time_hours * num_nodes, 2)
 
             total_aws   += aws_total
             total_azure += azure_total
@@ -313,6 +330,7 @@ def process_and_aggregate_metrics():
                 "mem_gb":          round(mem_mb / 1024, 1) if mem_mb else 0,
                 "gpu_count":       gpu_count,
                 "gpu_model":       gpu_model or "—",
+                "num_nodes":       num_nodes,
                 "time_limit_min":  time_limit_minutes,
                 "aws_instance":    aws_inst["name"],
                 "aws_hourly":      aws_inst["price"],

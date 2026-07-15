@@ -107,6 +107,7 @@ def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
         for passes in [
             lambda i: i["gpu_count"] >= gpu_count and (not norm_gpu or i["gpu_model"] == norm_gpu) and i["vcpus"] >= max(cpus,1) and i["mem_gb"] >= mem_gb,
             lambda i: i["gpu_count"] >= gpu_count and (not norm_gpu or i["gpu_model"] == norm_gpu) and i["vcpus"] >= max(cpus,1),
+            lambda i: i["gpu_count"] >= gpu_count and i.get("gpu_vendor", "nvidia") == "nvidia" and i["vcpus"] >= max(cpus,1),
             lambda i: i["gpu_count"] >= gpu_count and i["vcpus"] >= max(cpus,1),
             lambda i: i["gpu_count"] >= gpu_count,
         ]:

@@ -86,6 +86,26 @@ GPU_MODEL_MAP = {
     "amd radeon instinct mi25":    "",
 }
 
+# Keywords that identify non-Nvidia GPU vendors in raw type strings.
+_AMD_GPU_KEYWORDS = frozenset(["amd", "radeon", "alveo", "instinct", "fpga"])
+
+
+def _gpu_vendor(raw_str: str, gpu_count: int) -> str:
+    """
+    Determine the GPU vendor from the raw GPU type/name string in a price-list CSV.
+    Returns 'nvidia', 'amd', 'fpga', or '' (no GPU / unknown).
+    Used by find_best_instance to prefer same-vendor instances when the job's
+    exact GPU model is unavailable.
+    """
+    if gpu_count == 0 or not raw_str:
+        return ""
+    lower = raw_str.strip().lower()
+    if "fpga" in lower or "alveo" in lower:
+        return "fpga"
+    if any(kw in lower for kw in ("amd", "radeon", "instinct")):
+        return "amd"
+    return "nvidia"  # all other GPU instance families are Nvidia
+
 
 def _normalize_gpu(raw: str) -> str:
     """Return a canonical GPU model name from a raw CSV / GRES GPU string."""
@@ -124,6 +144,7 @@ def load_aws_catalog(path: str = _AWS_CSV) -> list:
                         "mem_gb":    float(row["MemorySizeInMB"]),  # values are in GB
                         "gpu_count": int(row.get("GPUCount") or 0),
                         "gpu_model": _normalize_gpu(row.get("GPUName", "")),
+                        "gpu_vendor": _gpu_vendor(row.get("GPUName", ""), int(row.get("GPUCount") or 0)),
                         "price":     price,
                     })
                 except (ValueError, KeyError):
@@ -162,6 +183,7 @@ def load_azure_catalog(path: str = _AZURE_CSV) -> list:
                         "mem_gb":    float(row["memoryInMB"]),   # values are in GB
                         "gpu_count": int(row.get("gpUs") or 0),
                         "gpu_model": _normalize_gpu(row.get("gpuType", "")),
+                        "gpu_vendor": _gpu_vendor(row.get("gpuType", ""), int(row.get("gpUs") or 0)),
                         "price":     price,
                     })
                 except (ValueError, KeyError):
