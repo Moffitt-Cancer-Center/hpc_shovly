@@ -91,6 +91,20 @@ def parse_tres_gpu(tres_str):
     return 0, ""
 
 
+def parse_tres_node_count(tres_str):
+    """Extract node count from sacct ReqTRES field. Returns 1 if absent."""
+    if not tres_str:
+        return 1
+    for part in tres_str.strip().lower().split(","):
+        part = part.strip()
+        if part.startswith("node="):
+            try:
+                return max(1, int(part.split("=", 1)[1]))
+            except ValueError:
+                pass
+    return 1
+
+
 def parse_sacct_timestamp(ts_str):
     """Convert sacct timestamp string (YYYY-MM-DDTHH:MM:SS) to Unix timestamp integer."""
     s = ts_str.strip()
@@ -191,8 +205,8 @@ CREATE INDEX IF NOT EXISTS idx_user    ON jobs(username);
 CREATE INDEX IF NOT EXISTS idx_cluster ON jobs(cluster);
 """
 
-INSERT_SQL_IGNORE  = "INSERT OR IGNORE  INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-INSERT_SQL_REPLACE = "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+INSERT_SQL_IGNORE  = "INSERT OR IGNORE  INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+INSERT_SQL_REPLACE = "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 
 
 def init_db(conn):
@@ -269,6 +283,7 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
                 time_limit_min = 0
 
             gpu_count, gpu_model = parse_tres_gpu(parts[7])
+            num_nodes = parse_tres_node_count(parts[7])
             # GPU model resolution priority:
             #   1. Parsed directly from ReqTRES (most accurate)
             #   2. Node map lookup via NodeList (from scontrol show nodes)
@@ -281,13 +296,18 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
                     gpu_model = default_gpu_model
             req_mem_mb = parse_sacct_mem_mb(parts[6])
 
+            # Normalize to per-node resources for cloud instance matching
+            if num_nodes > 1:
+                req_cpus  = max(1, req_cpus  // num_nodes)
+                gpu_count = max(1, gpu_count // num_nodes)
+
             aws_inst   = find_best_instance(AWS_INSTANCES,   req_cpus, req_mem_mb, gpu_count, gpu_model)
             azure_inst = find_best_instance(AZURE_INSTANCES, req_cpus, req_mem_mb, gpu_count, gpu_model)
 
             # Use time_limit if available, otherwise fall back to elapsed
             time_hours = (time_limit_min or elapsed_min) / 60.0
-            aws_total   = round(aws_inst["price"]   * time_hours, 4)
-            azure_total = round(azure_inst["price"] * time_hours, 4)
+            aws_total   = round(aws_inst["price"]   * time_hours * num_nodes, 4)
+            azure_total = round(azure_inst["price"] * time_hours * num_nodes, 4)
 
             batch.append((
                 job_id, cluster, username,
@@ -298,6 +318,7 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
                 parts[10].strip(),
                 aws_inst["name"],   aws_total,
                 azure_inst["name"], azure_total,
+                num_nodes,
             ))
 
             if len(batch) >= BATCH_SIZE:
