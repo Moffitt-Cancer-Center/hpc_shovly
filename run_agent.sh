@@ -30,6 +30,34 @@ CLUSTER_NAME="${CLUSTER_NAME:-slurm}"
 # Leave blank for CPU-only clusters or clusters where all jobs specify the model.
 DEFAULT_GPU_MODEL="${DEFAULT_GPU_MODEL:-}"
 
+# --------------------------------------------------------------------------
+# SLURM_CONF — critical for cron: without it Slurm attempts DNS SRV discovery
+# which fails in cron's minimal environment (no search domains).
+#
+# Override in crontab:
+#   */5 * * * * SLURM_CONF=/etc/slurm/slurm.conf /share/hpc_shared/shovly/run_agent.sh
+#
+# Or set it here permanently:
+#   SLURM_CONF="/etc/slurm/slurm.conf"
+# --------------------------------------------------------------------------
+if [ -z "${SLURM_CONF:-}" ]; then
+    for _try_conf in \
+        "${SLURM_BIN_DIR%/bin}/etc/slurm.conf" \
+        "/etc/slurm/slurm.conf" \
+        "/etc/slurm-llnl/slurm.conf" \
+        "/cm/shared/apps/slurm/current/etc/slurm.conf"; do
+        if [ -f "$_try_conf" ]; then
+            export SLURM_CONF="$_try_conf"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] INFO: Auto-detected SLURM_CONF=$SLURM_CONF" >&2
+            break
+        fi
+    done
+    if [ -z "${SLURM_CONF:-}" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: SLURM_CONF not found in common locations." >&2
+        echo "  Set SLURM_CONF=/path/to/slurm.conf in your crontab to fix DNS SRV failures." >&2
+    fi
+fi
+
 # SSL / HTTPS options — needed when the dashboard is behind a reverse proxy
 # (e.g., Open OnDemand) that uses an internal or self-signed certificate.
 #

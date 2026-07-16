@@ -417,10 +417,10 @@ def get_running_jobs(slurm_bin_dir=None, node_gpu_map=None):
 
     except FileNotFoundError:
         logger.error("squeue not found at '%s'. Set SLURM_BIN_DIR to the correct path.", squeue)
-        return []
+        return None
     except subprocess.CalledProcessError as e:
         logger.error("squeue failed: %s", e.stderr.decode('utf-8'))
-        return []
+        return None
 
 
 def get_completed_jobs_since(checkpoint_ts, cluster_name, slurm_bin_dir=None, node_gpu_map=None):
@@ -567,6 +567,13 @@ def main():
 
     # --- Running jobs (for the live dashboard) ---
     jobs = get_running_jobs(slurm_bin_dir, node_gpu_map=node_gpu_map)
+    if jobs is None:
+        logger.error(
+            "squeue failed — Slurm environment is not functional in this context. "
+            "Skipping POST to avoid a spurious HTTP timeout. "
+            "Fix: export SLURM_CONF=/path/to/slurm.conf in your crontab."
+        )
+        sys.exit(1)
     logger.info("Found %d running jobs.", len(jobs))
 
     # Apply --default-gpu-model as final fallback (node map takes priority)
