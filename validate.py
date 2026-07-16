@@ -467,8 +467,10 @@ def cmd_gpu(args):
     if no_model["cnt"]:
         print()
         print(YELLOW(f"  ⚠  {no_model['cnt']:,} GPU jobs have no model stored (gpu_model='')."))
-        print(f"     These map to the cheapest GPU instance ({fmt_money(no_model['aws'])} AWS total).")
-        print(f"     Re-import with --node-gpu-map to resolve model names.")
+        print(f"     Instance selection falls back to cheapest available GPU instance.")
+        print(f"     Total AWS cost for these jobs: {fmt_money(no_model['aws'])}.")
+        print(f"     Run: python3 import_history.py --patch-gpu-model <model> --db {args.db}")
+        print(f"     to assign a model and recalculate costs for records not in the CSV dump.")
 
     # GPU cost per hour efficiency
     print()

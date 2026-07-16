@@ -411,6 +411,68 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
 
 
 # ---------------------------------------------------------------------------
+# DB patch — fill gpu_model for records that pre-date the fallback logic
+# ---------------------------------------------------------------------------
+
+def patch_missing_gpu_model(db_path, default_gpu_model, node_gpu_map=None):
+    """
+    Update every DB record that has gpu_count > 0 but an empty gpu_model.
+    Used when jobs were imported before the --default-gpu-model fallback existed,
+    so they are present in the DB but were never covered by a subsequent
+    --force-update run (because their job IDs are absent from the new CSV dump).
+
+    Recalculates aws_total / azure_total using the new model so costs stay
+    consistent with the instance selection logic.
+    """
+    if not os.path.exists(db_path):
+        logger.error("Database not found: %s", db_path)
+        sys.exit(1)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+
+    rows = conn.execute("""
+        SELECT job_id, cluster, req_cpus, req_mem_mb, gpu_count,
+               time_limit_min, elapsed_min,
+               COALESCE(num_nodes, 1) AS num_nodes
+        FROM jobs
+        WHERE gpu_count > 0 AND (gpu_model = '' OR gpu_model IS NULL)
+    """).fetchall()
+
+    if not rows:
+        logger.info("No GPU jobs with missing gpu_model found — nothing to patch.")
+        conn.close()
+        return
+
+    logger.info("Patching %d GPU job(s) with gpu_model='%s' …", len(rows), default_gpu_model)
+    updated = 0
+    for r in rows:
+        gpu_model = default_gpu_model
+        aws_inst   = find_best_instance(AWS_INSTANCES,   r["req_cpus"], r["req_mem_mb"], r["gpu_count"], gpu_model)
+        azure_inst = find_best_instance(AZURE_INSTANCES, r["req_cpus"], r["req_mem_mb"], r["gpu_count"], gpu_model)
+        nn         = r["num_nodes"] or 1
+        time_hours = (r["time_limit_min"] or r["elapsed_min"]) / 60.0
+        aws_total   = round(aws_inst["price"]   * time_hours * nn, 4)
+        azure_total = round(azure_inst["price"] * time_hours * nn, 4)
+        conn.execute("""
+            UPDATE jobs
+               SET gpu_model      = ?,
+                   aws_instance   = ?,  aws_total   = ?,
+                   azure_instance = ?,  azure_total = ?
+             WHERE job_id = ? AND cluster = ?
+        """, (gpu_model,
+               aws_inst["name"],   aws_total,
+               azure_inst["name"], azure_total,
+               r["job_id"], r["cluster"]))
+        updated += 1
+
+    conn.commit()
+    conn.close()
+    logger.info("Patch complete.  Updated: %d GPU job(s).", updated)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -443,7 +505,19 @@ def main():
              "Use this when re-importing after fixing GPU detection so that historical "
              "costs are recalculated with correct GPU instance pricing."
     )
+    parser.add_argument(
+        "--patch-gpu-model", default="", metavar="MODEL",
+        help="Patch existing DB records that have gpu_count > 0 but no gpu_model stored. "
+             "Assigns MODEL to every such record and recalculates its cloud costs. "
+             "No CSV file is required; use this after --force-update when older records "
+             "were not covered by the CSV dump (e.g. 'nvidia_l40s')."
+    )
     args = parser.parse_args()
+
+    # --patch-gpu-model: standalone DB patch, no CSV import needed
+    if args.patch_gpu_model:
+        patch_missing_gpu_model(args.db, args.patch_gpu_model)
+        return
 
     if not os.path.exists(args.csv_file):
         logger.error("CSV file not found: %s", args.csv_file)
