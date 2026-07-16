@@ -414,9 +414,10 @@ def import_csv(csv_path, db_path, default_gpu_model="", node_gpu_map=None, force
 # DB patch — fill gpu_model for records that pre-date the fallback logic
 # ---------------------------------------------------------------------------
 
-def patch_missing_gpu_model(db_path, default_gpu_model, node_gpu_map=None):
+def patch_missing_gpu_model(db_path, default_gpu_model, cluster=None):
     """
     Update every DB record that has gpu_count > 0 but an empty gpu_model.
+    Pass cluster= to restrict the patch to one cluster; omit to patch all clusters.
     Used when jobs were imported before the --default-gpu-model fallback existed,
     so they are present in the DB but were never covered by a subsequent
     --force-update run (because their job IDs are absent from the new CSV dump).
@@ -432,13 +433,24 @@ def patch_missing_gpu_model(db_path, default_gpu_model, node_gpu_map=None):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
 
-    rows = conn.execute("""
-        SELECT job_id, cluster, req_cpus, req_mem_mb, gpu_count,
-               time_limit_min, elapsed_min,
-               COALESCE(num_nodes, 1) AS num_nodes
-        FROM jobs
-        WHERE gpu_count > 0 AND (gpu_model = '' OR gpu_model IS NULL)
-    """).fetchall()
+    if cluster:
+        logger.info("Cluster filter: %s", cluster)
+        rows = conn.execute("""
+            SELECT job_id, cluster, req_cpus, req_mem_mb, gpu_count,
+                   time_limit_min, elapsed_min,
+                   COALESCE(num_nodes, 1) AS num_nodes
+            FROM jobs
+            WHERE gpu_count > 0 AND (gpu_model = '' OR gpu_model IS NULL)
+              AND cluster = ?
+        """, (cluster,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT job_id, cluster, req_cpus, req_mem_mb, gpu_count,
+                   time_limit_min, elapsed_min,
+                   COALESCE(num_nodes, 1) AS num_nodes
+            FROM jobs
+            WHERE gpu_count > 0 AND (gpu_model = '' OR gpu_model IS NULL)
+        """).fetchall()
 
     if not rows:
         logger.info("No GPU jobs with missing gpu_model found — nothing to patch.")
@@ -508,15 +520,22 @@ def main():
     parser.add_argument(
         "--patch-gpu-model", default="", metavar="MODEL",
         help="Patch existing DB records that have gpu_count > 0 but no gpu_model stored. "
-             "Assigns MODEL to every such record and recalculates its cloud costs. "
-             "No CSV file is required; use this after --force-update when older records "
-             "were not covered by the CSV dump (e.g. 'nvidia_l40s')."
+             "Assigns MODEL to every matching record and recalculates its cloud costs. "
+             "No CSV file is required. Combine with --cluster to restrict to one cluster "
+             "(run once per cluster when each has different GPU hardware). "
+             "Example: --patch-gpu-model nvidia_l40s --cluster concordia"
+    )
+    parser.add_argument(
+        "--cluster", default="", metavar="NAME",
+        help="Restrict --patch-gpu-model to a specific cluster name. "
+             "Has no effect during normal CSV import (cluster is read from the CSV)."
     )
     args = parser.parse_args()
 
     # --patch-gpu-model: standalone DB patch, no CSV import needed
     if args.patch_gpu_model:
-        patch_missing_gpu_model(args.db, args.patch_gpu_model)
+        patch_missing_gpu_model(args.db, args.patch_gpu_model,
+                                cluster=args.cluster or None)
         return
 
     if not os.path.exists(args.csv_file):
