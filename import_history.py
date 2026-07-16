@@ -143,28 +143,34 @@ def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
     mem_gb = mem_mb / 1024.0
     norm_gpu = GPU_MODEL_MAP.get(gpu_model.lower(), gpu_model.upper()) if gpu_model else ""
 
+    # When model is unknown require a real GPU vendor so Inferentia/Trainium are excluded
+    def _real_gpu(i): return (i["gpu_model"] == norm_gpu) if norm_gpu else (i.get("gpu_vendor") in ("nvidia", "amd"))
     if gpu_count > 0:
         c = [i for i in catalog
              if i["gpu_count"] >= gpu_count
-             and (not norm_gpu or i["gpu_model"] == norm_gpu)
+             and _real_gpu(i)
              and i["vcpus"] >= max(cpus, 1)
              and i["mem_gb"] >= mem_gb]
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count
-                 and (not norm_gpu or i["gpu_model"] == norm_gpu)
+                 and _real_gpu(i)
                  and i["vcpus"] >= max(cpus, 1)]
         # Pass 2.5: relax model but prefer Nvidia over AMD
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count
-                 and i.get("gpu_vendor", "nvidia") == "nvidia"
+                 and i.get("gpu_vendor") == "nvidia"
                  and i["vcpus"] >= max(cpus, 1)]
         if not c:
             c = [i for i in catalog
-                 if i["gpu_count"] >= gpu_count and i["vcpus"] >= max(cpus, 1)]
+                 if i["gpu_count"] >= gpu_count
+                 and i.get("gpu_vendor") in ("nvidia", "amd")
+                 and i["vcpus"] >= max(cpus, 1)]
         if not c:
-            c = [i for i in catalog if i["gpu_count"] >= gpu_count]
+            c = [i for i in catalog
+                 if i["gpu_count"] >= gpu_count
+                 and i.get("gpu_vendor") in ("nvidia", "amd")]
         if c:
             return min(c, key=lambda x: x["price"])
 

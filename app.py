@@ -187,32 +187,43 @@ def find_best_instance(catalog, cpus, mem_mb, gpu_count, gpu_model):
     norm_gpu = GPU_MODEL_MAP.get(gpu_model.lower(), gpu_model.upper()) if gpu_model else ""
 
     if gpu_count > 0:
-        # Pass 1: exact GPU model + count + vCPUs + memory
+        # When gpu_model is unknown, require a real GPU vendor (nvidia/amd) so
+        # that AWS Inferentia (inf1/inf2) and Trainium (trn1) instances — which
+        # have gpu_count>0 but gpu_vendor='' — are never chosen for GPU jobs.
+        def _real_gpu(i):
+            if norm_gpu:
+                return i["gpu_model"] == norm_gpu
+            return i.get("gpu_vendor") in ("nvidia", "amd")
+
+        # Pass 1: exact GPU model (or real-GPU vendor) + count + vCPUs + memory
         c = [i for i in catalog
              if i["gpu_count"] >= gpu_count
-             and (not norm_gpu or i["gpu_model"] == norm_gpu)
+             and _real_gpu(i)
              and i["vcpus"] >= max(cpus, 1)
              and i["mem_gb"] >= mem_gb]
         # Pass 2: relax memory requirement
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count
-                 and (not norm_gpu or i["gpu_model"] == norm_gpu)
+                 and _real_gpu(i)
                  and i["vcpus"] >= max(cpus, 1)]
         # Pass 2.5: relax GPU model but keep Nvidia (avoids matching cheaper AMD instances)
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count
-                 and i.get("gpu_vendor", "nvidia") == "nvidia"
+                 and i.get("gpu_vendor") == "nvidia"
                  and i["vcpus"] >= max(cpus, 1)]
-        # Pass 3: any GPU vendor (last resort before falling to CPU-only)
+        # Pass 3: any real GPU vendor (nvidia or amd)
         if not c:
             c = [i for i in catalog
                  if i["gpu_count"] >= gpu_count
+                 and i.get("gpu_vendor") in ("nvidia", "amd")
                  and i["vcpus"] >= max(cpus, 1)]
-        # Pass 4: just GPU count
+        # Pass 4: any real GPU, relax vCPUs
         if not c:
-            c = [i for i in catalog if i["gpu_count"] >= gpu_count]
+            c = [i for i in catalog
+                 if i["gpu_count"] >= gpu_count
+                 and i.get("gpu_vendor") in ("nvidia", "amd")]
         if c:
             return min(c, key=lambda x: x["price"])
 
