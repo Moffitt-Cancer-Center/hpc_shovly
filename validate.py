@@ -764,7 +764,8 @@ def cmd_recalc_check(args):
     rows = conn.execute(f"""
         SELECT job_id, cluster, username, req_cpus, req_mem_mb, gpu_count, gpu_model,
                time_limit_min, elapsed_min,
-               aws_instance, aws_total, azure_instance, azure_total
+               aws_instance, aws_total, azure_instance, azure_total,
+               COALESCE(num_nodes, 1) AS num_nodes
         FROM jobs {where}
     """, params).fetchall()
 
@@ -777,10 +778,11 @@ def cmd_recalc_check(args):
 
     for r in rows:
         th = (r["time_limit_min"] or r["elapsed_min"]) / 60.0
+        nn = r["num_nodes"] or 1
         expected_aws  = find_best_instance(AWS_INSTANCES,   r["req_cpus"], r["req_mem_mb"], r["gpu_count"], r["gpu_model"])
         expected_az   = find_best_instance(AZURE_INSTANCES, r["req_cpus"], r["req_mem_mb"], r["gpu_count"], r["gpu_model"])
-        calc_aws   = round(expected_aws["price"]  * th, 4)
-        calc_az    = round(expected_az["price"]   * th, 4)
+        calc_aws   = round(expected_aws["price"]  * th * nn, 4)
+        calc_az    = round(expected_az["price"]   * th * nn, 4)
         delta_aws  = abs(calc_aws  - (r["aws_total"]   or 0))
         delta_az   = abs(calc_az   - (r["azure_total"] or 0))
 
